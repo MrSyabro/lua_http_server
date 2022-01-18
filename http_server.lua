@@ -1,6 +1,7 @@
 #!/bin/lua
 local socket = require("socket")
 local ltn12 = require("ltn12")
+local args = {...}
 
 --{{Options
 ---The port number for the HTTP server. Default is 80
@@ -12,6 +13,8 @@ BACKLOG=5
 -- Этот параметр определяет, где сервер буде искать файлы.
 ROOT_DIR="./"
 --}}Options
+
+local root_dir = args[1] or ROOT_DIR
 
 -- Загружаем короткие имена, если есть.
 local aliases = {}
@@ -64,7 +67,7 @@ local function read_request (client)
 		local reading = true
 		while reading do
 			local header_line, err = client:receive("*l")
-			reading = (header_line ~= "")
+			reading = (header_line ~= "" and header_line ~= nil)
 			if reading then
 				table.insert(raw_headers, header_line)
 				local key, value = string.match (header_line, "(%g+): ([%g ]+)")
@@ -150,9 +153,9 @@ while 1 do
 					env.request = request
 					env.response = response
 
-					f, err = loadfile(ROOT_DIR..request.filename, "t", env) 	-- загрузка скрипта
+					f, err = loadfile(root_dir..request.filename, "t", env) 	-- загрузка скрипта
 					if f then
-						stat, ret = pcall(f, request) 	-- выполняем скрипт
+						stat, ret = pcall(f) 	-- выполняем скрипт
 						if stat then
 							tmp_f:seek ("set")
 							f = tmp_f
@@ -168,7 +171,7 @@ while 1 do
 						response.mess = "Open file error"
 					end
 				else 	-- иначе
-					f = io.open(ROOT_DIR..request.filename) 	-- открываем файл для чтения
+					f = io.open(root_dir..request.filename) 	-- открываем файл для чтения
 				end
 			end
 

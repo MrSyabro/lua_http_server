@@ -13,14 +13,10 @@ dependencies = {
 }
 build = {
    type = "builtin",
-   modules = {
-   },
+   modules = {},
    install = {
       bin = {
          http_server = "http_server.lua"
-      },
-      lua = {
-         ["aliases"] = "aliases.lua",
       }
    }
 }
