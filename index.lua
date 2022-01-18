@@ -15,6 +15,6 @@ local body =
 "<p>$NAME = "..os.getenv("NAME").."</p>"..
 "<p>Дата на сервере: "..os.date().."</p><br>"..
 "<p>Взгляни на следующую страницу.</p>"..
-"<a href='/dump-headers.lua'>Dump headers script</a>"
+"<a href='/dump-headers'>Dump headers script</a>"
 
 io.html:write(base:format(body).."\n")

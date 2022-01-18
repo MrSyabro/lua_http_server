@@ -56,39 +56,43 @@ end
 
 local function read_request (client)
  	local start_line, err = client:receive("*l")
-	local request = parse_start_line(start_line)
-	local raw_headers = {}
-	request.headers = {}
+	if start_line then
+		local request = parse_start_line(start_line)
+		local raw_headers = {}
+		request.headers = {}
 
-	local reading = true
-	while reading do
-		local header_line, err = client:receive("*l")
-		reading = (header_line ~= "")
-		if reading then
-			table.insert(raw_headers, header_line)
-			local key, value = string.match (header_line, "(%g+): ([%g ]+)")
-			if key then
-				request.headers[key:lower()] = value
+		local reading = true
+		while reading do
+			local header_line, err = client:receive("*l")
+			reading = (header_line ~= "")
+			if reading then
+				table.insert(raw_headers, header_line)
+				local key, value = string.match (header_line, "(%g+): ([%g ]+)")
+				if key then
+					request.headers[key:lower()] = value
+				end
 			end
 		end
-	end
 
-	request.header = table.concat(raw_headers)
+		request.header = table.concat(raw_headers)
 
-	request.filename, request.args = parse_uri(request.uri)
+		request.filename, request.args = parse_uri(request.uri)
 
-	for k,i in ipairs(aliases) do
-		if request.filename == i.name then
-			if i.uri then 
-				request.uri = i.uri
-				request.filename, request.args = parse_uri(request.uri)
+		for k,i in ipairs(aliases) do
+			if request.filename == i.name then
+				if i.uri then 
+					request.uri = i.uri
+					request.filename, request.args = parse_uri(request.uri)
+				end
+				if i.aliase then request.filename = i.aliase end
+				break
 			end
-			if i.aliase then request.filename = i.aliase end
-			break
 		end
-	end
 
-	return request
+		return request
+	else
+		return nil, err
+	end
 end
 
 local function send_headers (client, headers)
@@ -131,59 +135,63 @@ while 1 do
 				["Content-Type"] = "text/html; charset=utf-8" -- По дефолту отправляем html, utf-8
 			}
 		}
-		local request = read_request(client)
-		io.write(("[INFO] %s request to %s\n"):format(request.method, request.filename))
-		local is_script = string.find(request.filename, ".lua") and true
-		
-		if request.method == "GET" then
-			if is_script then 	-- если обратились к lua фалу
-				local tmp_f = io.tmpfile() 	-- времнный файл для вывода
-				local stat, ret
+		local request, err = read_request(client)
+		if request then
+			io.write(("[INFO] %s request to %s\n"):format(request.method, request.filename))
+			local is_script = string.find(request.filename, ".lua") and true
+			
+			if request.method == "GET" then
+				if is_script then 	-- если обратились к lua фалу
+					local tmp_f = io.tmpfile() 	-- времнный файл для вывода
+					local stat, ret
 
-				local env = _G
-				env.io.html = tmp_f
-				env.request = request
-				env.response = response
+					local env = _G
+					env.io.html = tmp_f
+					env.request = request
+					env.response = response
 
-				f, err = loadfile(ROOT_DIR..request.filename, "t", env) 	-- загрузка скрипта
-				if f then
-					stat, ret = pcall(f, request) 	-- выполняем скрипт
-					if stat then
-						tmp_f:seek ("set")
-						f = tmp_f
+					f, err = loadfile(ROOT_DIR..request.filename, "t", env) 	-- загрузка скрипта
+					if f then
+						stat, ret = pcall(f, request) 	-- выполняем скрипт
+						if stat then
+							tmp_f:seek ("set")
+							f = tmp_f
+						else
+							io.stderr:write("[ERROR] "..ret.."\n")
+							f = nil
+							response.code = 500
+							response.mess = "Script error"
+						end
 					else
-						io.stderr:write("[ERROR] "..ret.."\n")
-						f = nil
+						io.stderr:write("[ERROR] "..err)
 						response.code = 500
-						response.mess = "Script error"
+						response.mess = "Open file error"
 					end
-				else
-					io.stderr:write("[ERROR] "..err)
-					response.code = 500
-					response.mess = "Open file error"
+				else 	-- иначе
+					f = io.open(ROOT_DIR..request.filename) 	-- открываем файл для чтения
 				end
-			else 	-- иначе
-				f = io.open(ROOT_DIR..request.filename) 	-- открываем файл для чтения
 			end
-		end
 
-		-- if there was no error, send it back to the client
-		if f then
-			local data_lenghth = f:seek("end") f:seek("set") 	-- Узнаем обьем выходных данных
-			response.headers["Content-Length"] = tostring(data_lenghth) -- ..указываем в заголовке
-			response.headers["Date"] = os.date("!%c GMT")
+			-- if there was no error, send it back to the client
+			if f then
+				local data_lenghth = f:seek("end") f:seek("set") 	-- Узнаем обьем выходных данных
+				response.headers["Content-Length"] = tostring(data_lenghth) -- ..указываем в заголовке
+				response.headers["Date"] = os.date("!%c GMT")
 
-			send_response(client, response)
+				send_response(client, response)
 
-			local source = ltn12.source.file(f)
-			local sink = socket.sink("close-when-done", client)
-			ltn12.pump.all(source, sink)
+				local source = ltn12.source.file(f)
+				local sink = socket.sink("close-when-done", client)
+				ltn12.pump.all(source, sink)
+			else
+				client:send(("HTTP/1.1 %d %s\n\n"):format(
+					response.code or 404,
+					response.mess or "Not Found"
+				))
+				client:send("<!DOCTYPE html><html lang='en'><!-- Noncompliant --><body><h1>"..(response.mess or "Not Found").."</h1><br><p>File "..request.filename.." not found.</p></body></html>")
+			end
 		else
-			client:send(("HTTP/1.1 %d %s\n\n"):format(
-				response.code or 404,
-				response.mess or "Not Found"
-			))
-			client:send("<!DOCTYPE html><html lang='en'><!-- Noncompliant --><body><h1>"..(response.mess or "Not Found").."</h1><br><p>File "..request.filename.." not found.</p></body></html>")
+			io.stderr:write("[ERROR] "..err.."\n")
 		end
 	else
 		print("Error happened while getting the connection.nError: "..err)
