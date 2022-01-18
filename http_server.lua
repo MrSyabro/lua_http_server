@@ -12,53 +12,55 @@ BACKLOG=5
 ROOT_DIR="./"
 --}}Options
 
-local function parse_request(request_str)
+local function parse_start_line(start_line)
 	local _request = {}
 	local request = {}
 	
-	for word in string.gmatch(request_str, "%g+") do
+	for word in string.gmatch(start_line, "%g+") do
 		table.insert(_request, word)
 	end
 	
-	request.type = _request[1]
+	request.method = _request[1]
+	request.uri = _request[2]
 	request.filename = _request[2]
 	request.protocol = _request[3]
 	
-	local i = string.find (_request[2], "?")
+	local i = string.find (request.uri, "?")
 	if i then
-		local args_str = string.sub (_request[2], i + 1)
+		local args_str = string.sub (request.uri, i + 1)
 		request.args = {}
 		
 		for key, value in string.gmatch(args_str, "(%w+)=(%w+)") do
 			request.args[key] = value
 		end
 		
-		request.filename = string.sub (_request[2], 1, i -1)
+		request.filename = string.sub (request.uri, 1, i -1)
 	end
 	
 	return request
 end
 
 local function read_request (client)
- 	local line, err = client:receive("*l")
-	local request = parse_request(line)
+ 	local start_line, err = client:receive("*l")
+	local request = parse_start_line(start_line)
 	local raw_headers = {}
 	request.headers = {}
 
 	local reading = true
 	while reading do
-		local line, err = client:receive("*l")
-		reading = (line ~= "")
+		local header_line, err = client:receive("*l")
+		reading = (header_line ~= "")
 		if reading then
-			table.insert(raw_headers, line)
-			local key, value = string.match (line, "(%g+): (%g+)")
+			table.insert(raw_headers, header_line)
+			local key, value = string.match (header_line, "(%g+): (%g+)")
 			if key then
 				request.headers[key:lower()] = value
 			end
 		end
 	end
 
-	request.headers.raw = table.concat(raw_headers)
+	request.header = table.concat(raw_headers)
+
 	if request.filename == "/" then
 		request.filename = "/index.lua"
 	end
@@ -85,12 +87,12 @@ while 1 do
 		local f
 		local response = {}
 		local request = read_request(client)
-		
-		io.write(("[INFO] %s request to %s file\n"):format(request.type, request.filename))
-		
 		local is_script = string.find(request.filename, ".lua") and true
 		
-		if request.type == "GET" then
+		io.write(("[INFO] %s request to %s%s\n"):format(request.method, request.filename, is_script and ". Execute." or ""))
+		
+		
+		if request.method == "GET" then
 			if is_script then -- если обратились к lua фалу
 				local tmp_f = io.tmpfile() -- времнный файл для вывода
 				local stat, ret
@@ -125,15 +127,15 @@ while 1 do
 
 		-- if there was no error, send it back to the client
 		if f then
-			client:send(("HTTP/1.1 %d %s"):format(
+			client:send(("HTTP/1.1 %d %s\n"):format(
 				response.code or 200,
 				response.mess or "OK"
 			))
 			
 			local data_lenghth = f:seek("end") f:seek("set")
-			client:send("Content-Length: "..tostring(data_lenghth))
-
-			client:send("\n\n")
+			client:send(("Content-Length: %s\n"):format(tostring(data_lenghth)))
+			client:send("Content-Type: text/html; charset=utf-8\n")
+			client:send("\n")
 
 			local source = ltn12.source.file(f)
 			local sink = socket.sink("close-when-done", client)
@@ -143,7 +145,7 @@ while 1 do
 				response.code or 404,
 				response.mess or "Not Found"
 			))
-			client:send("<h1>"..(response.mess or "Not Found").."</h1><br><p>File "..request.filename.." not found.</p>")
+			client:send("<!DOCTYPE html><html lang='en'><!-- Noncompliant --><body><h1>"..(response.mess or "Not Found").."</h1><br><p>File "..request.filename.." not found.</p></body></html>")
 		end
 	else
 		print("Error happened while getting the connection.nError: "..err)
