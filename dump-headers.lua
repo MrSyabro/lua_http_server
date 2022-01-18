@@ -21,8 +21,10 @@ local function print_table(t)
     return table.concat(out_table, "\n")
 end
 
-local h = "<h1> Headers </h1><br>"
+local head = "<h1> Headers </h1><br>"..
+    "<p>Следующая таблица генерируется из запроса</p>"..
+    "<p>Демонстрирует итеративную динамическую генерацию таблици</p>"
 local s = print_table(request.headers)
-local a = "<br><a href='/'> Home </a>"
+local body_end = "<br><a href='/'>Home</a>"
 
-io.html:write(base:format(h..s..a))
+io.html:write(base:format(head..s..body_end))

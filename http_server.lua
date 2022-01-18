@@ -1,3 +1,4 @@
+#!/bin/lua
 local socket = require("socket")
 local ltn12 = require("ltn12")
 
@@ -65,7 +66,7 @@ local function read_request (client)
 		reading = (header_line ~= "")
 		if reading then
 			table.insert(raw_headers, header_line)
-			local key, value = string.match (header_line, "(%g+): (%g+)")
+			local key, value = string.match (header_line, "(%g+): ([%g ]+)")
 			if key then
 				request.headers[key:lower()] = value
 			end
@@ -127,7 +128,7 @@ while 1 do
 		local f
 		local response = {
 			headers = {
-				["content-type"] = "text/html; charset=utf-8" -- По дефолту отправляем html, utf-8
+				["Content-Type"] = "text/html; charset=utf-8" -- По дефолту отправляем html, utf-8
 			}
 		}
 		local request = read_request(client)
@@ -170,6 +171,7 @@ while 1 do
 		if f then
 			local data_lenghth = f:seek("end") f:seek("set") 	-- Узнаем обьем выходных данных
 			response.headers["Content-Length"] = tostring(data_lenghth) -- ..указываем в заголовке
+			response.headers["Date"] = os.date("!%c GMT")
 
 			send_response(client, response)
 
