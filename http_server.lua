@@ -68,6 +68,24 @@ local function read_request (client)
 	return request
 end
 
+local function send_headers (client, headers)
+	for i, k in pairs(headers) do
+		local header = ("%s: %s\n"):format(i, k)
+		client:send(header)
+	end
+end
+
+local function send_response (client, response)
+	client:send(("HTTP/1.1 %d %s\n"):format(
+		response.code or 200,
+		response.mess or "OK"
+	))
+	
+	send_headers(client, response.headers)
+	
+	client:send("\n")
+end
+
 -- create a TCP socket and bind it to the local host, at any port
 server=assert(socket.tcp())
 server:setoption("reuseaddr", true)
@@ -85,7 +103,11 @@ while 1 do
 
 	if client then
 		local f
-		local response = {}
+		local response = {
+			headers = {
+				["content-type"] = "text/html; charset=utf-8" -- По дефолту отправляем html, utf-8
+			}
+		}
 		local request = read_request(client)
 		local is_script = string.find(request.filename, ".lua") and true
 		
@@ -93,8 +115,8 @@ while 1 do
 		
 		
 		if request.method == "GET" then
-			if is_script then -- если обратились к lua фалу
-				local tmp_f = io.tmpfile() -- времнный файл для вывода
+			if is_script then 	-- если обратились к lua фалу
+				local tmp_f = io.tmpfile() 	-- времнный файл для вывода
 				local stat, ret
 
 				local env = _G
@@ -102,9 +124,9 @@ while 1 do
 				env.request = request
 				env.response = response
 
-				f, err = loadfile(ROOT_DIR..request.filename, "t", env) -- загрузка скрипта
+				f, err = loadfile(ROOT_DIR..request.filename, "t", env) 	-- загрузка скрипта
 				if f then
-					stat, ret = pcall(f, request) -- выполняем скрипт
+					stat, ret = pcall(f, request) 	-- выполняем скрипт
 				else
 					io.stderr:write("[ERROR] "..err)
 					response.code = 500
@@ -120,22 +142,17 @@ while 1 do
 					response.code = 500
 					response.mess = "Script error"
 				end
-			else -- иначе
-				f = io.open(ROOT_DIR..request.filename) -- открываем файл для чтения
+			else 	-- иначе
+				f = io.open(ROOT_DIR..request.filename) 	-- открываем файл для чтения
 			end
 		end
 
 		-- if there was no error, send it back to the client
 		if f then
-			client:send(("HTTP/1.1 %d %s\n"):format(
-				response.code or 200,
-				response.mess or "OK"
-			))
-			
-			local data_lenghth = f:seek("end") f:seek("set")
-			client:send(("Content-Length: %s\n"):format(tostring(data_lenghth)))
-			client:send("Content-Type: text/html; charset=utf-8\n")
-			client:send("\n")
+			local data_lenghth = f:seek("end") f:seek("set") 	-- Узнаем обьем выходных данных
+			response.headers["Content-Length"] = tostring(data_lenghth) -- ..указываем в заголовке
+
+			send_response(client, response)
 
 			local source = ltn12.source.file(f)
 			local sink = socket.sink("close-when-done", client)
