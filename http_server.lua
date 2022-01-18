@@ -1,6 +1,16 @@
 local socket = require("socket")
-local mime = require("mime")
 local ltn12 = require("ltn12")
+
+--{{Options
+---The port number for the HTTP server. Default is 80
+PORT=8080
+---The parameter backlog specifies the number of client connections
+-- that can be queued waiting for service. If the queue is full and
+-- another client attempts connection, the connection is refused.
+BACKLOG=5
+-- Этот параметр определяет, где сервер буде искать файлы.
+ROOT_DIR="./"
+--}}Options
 
 local function parse_request(request_str)
 	local _request = {}
@@ -29,15 +39,32 @@ local function parse_request(request_str)
 	return request
 end
 
---{{Options
----The port number for the HTTP server. Default is 80
-PORT=8080
----The parameter backlog specifies the number of client connections
--- that can be queued waiting for service. If the queue is full and
--- another client attempts connection, the connection is refused.
-BACKLOG=5
-ROOT_DIR="./"
---}}Options
+local function read_request (client)
+ 	local line, err = client:receive("*l")
+	local request = parse_request(line)
+	local raw_headers = {}
+	request.headers = {}
+
+	local reading = true
+	while reading do
+		local line, err = client:receive("*l")
+		reading = (line ~= "")
+		if reading then
+			table.insert(raw_headers, line)
+			local key, value = string.match (line, "(%g+): (%g+)")
+			if key then
+				request.headers[key:lower()] = value
+			end
+		end
+	end
+
+	request.headers.raw = table.concat(raw_headers)
+	if request.filename == "/" then
+		request.filename = "/index.lua"
+	end
+
+	return request
+end
 
 -- create a TCP socket and bind it to the local host, at any port
 server=assert(socket.tcp())
@@ -55,51 +82,68 @@ while 1 do
 	local client, err = server:accept()
 
 	if client then
-		local f, err_code
-		local line, err = client:receive("*l")
-		local request = parse_request (line)
+		local f
+		local response = {}
+		local request = read_request(client)
 		
-		print("TYPE: "..request.type)
-		print("FILE: "..request.filename)
+		io.write(("[INFO] %s request to %s file\n"):format(request.type, request.filename))
 		
 		local is_script = string.find(request.filename, ".lua") and true
 		
 		if request.type == "GET" then
-			if is_script then
-				local tmp_f = io.tmpfile()
+			if is_script then -- если обратились к lua фалу
+				local tmp_f = io.tmpfile() -- времнный файл для вывода
 				local stat, ret
+
 				local env = _G
 				env.io.html = tmp_f
 				env.request = request
-				f, err = loadfile(ROOT_DIR..request.filename, "t", env)
+				env.response = response
+
+				f, err = loadfile(ROOT_DIR..request.filename, "t", env) -- загрузка скрипта
 				if f then
-					stat, ret = pcall(f, request)
+					stat, ret = pcall(f, request) -- выполняем скрипт
+				else
+					io.stderr:write("[ERROR] "..err)
+					response.code = 500
+					response.mess = "Open file error"
 				end
+
 				if stat then
 					tmp_f:seek ("set")
 					f = tmp_f
 				else
 					io.stderr:write("[ERROR] "..ret)
 					f = nil
+					response.code = 500
+					response.mess = "Script error"
 				end
-			else
-				f = io.open(ROOT_DIR..request.filename)
+			else -- иначе
+				f = io.open(ROOT_DIR..request.filename) -- открываем файл для чтения
 			end
 		end
 
 		-- if there was no error, send it back to the client
 		if f then
-			client:send("HTTP/1.0 200 OK")
+			client:send(("HTTP/1.1 %d %s"):format(
+				response.code or 200,
+				response.mess or "OK"
+			))
 			
+			local data_lenghth = f:seek("end") f:seek("set")
+			client:send("Content-Length: "..tostring(data_lenghth))
+
 			client:send("\n\n")
-			
+
 			local source = ltn12.source.file(f)
 			local sink = socket.sink("close-when-done", client)
 			ltn12.pump.all(source, sink)
 		else
-			
-			client:send("HTTP/1.0 404 Not Found\n\n")
-			client:send("File not found.")
+			client:send(("HTTP/1.1 %d %s\n\n"):format(
+				response.code or 404,
+				response.mess or "Not Found"
+			))
+			client:send("<h1>"..(response.mess or "Not Found").."</h1><br><p>File "..request.filename.." not found.</p>")
 		end
 	else
 		print("Error happened while getting the connection.nError: "..err)
@@ -107,5 +151,4 @@ while 1 do
 
 	-- done with client, close the object
 	client:close()
-	print("Terminated")
 end
