@@ -1,11 +1,12 @@
-local base = [[<html>
-<head>
-  <meta charset="utf-8">
-  <title>Headers dump</title>
-</head>
-  <body>
-    %s
-  </body>
+local base = [[<!DOCTYPE html>
+<html lang='ru'><!-- Noncompliant -->
+    <head>
+        <title>Request headers</title>
+        <meta content="text/html; charset=utf-8" />
+    </head>
+    <body>
+        %s
+    </body>
 </html>]]
 
 local function print_table(t)
@@ -20,7 +21,8 @@ local function print_table(t)
     return table.concat(out_table, "\n")
 end
 
-local body = "<h1> Headers </h1><br>"
+local h = "<h1> Headers </h1><br>"
 local s = print_table(request.headers)
+local a = "<br><a href='/'> Home </a>"
 
-io.html:write(base:format(body)..s.."\n")
+io.html:write(base:format(h..s..a))
