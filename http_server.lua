@@ -12,6 +12,31 @@ BACKLOG=5
 ROOT_DIR="./"
 --}}Options
 
+-- Загружаем короткие имена, если есть.
+local aliases = {}
+
+local aliases_file, err = loadfile("aliases.lua", "t", {})
+if aliases_file then
+	aliases = aliases_file()
+end
+
+-- Делим ссылку на имя файла и аргументы
+local function parse_uri (uri)
+	local i = string.find (uri, "?")
+	if i then
+		local args_str = string.sub (uri, i + 1)
+		local args = {}
+		
+		for key, value in string.gmatch(args_str, "(%w+)=(%w+)") do
+			args[key] = value
+		end
+		
+		return string.sub (uri, 1, i -1), args
+	else
+		return uri
+	end
+end
+
 local function parse_start_line(start_line)
 	local _request = {}
 	local request = {}
@@ -24,18 +49,6 @@ local function parse_start_line(start_line)
 	request.uri = _request[2]
 	request.filename = _request[2]
 	request.protocol = _request[3]
-	
-	local i = string.find (request.uri, "?")
-	if i then
-		local args_str = string.sub (request.uri, i + 1)
-		request.args = {}
-		
-		for key, value in string.gmatch(args_str, "(%w+)=(%w+)") do
-			request.args[key] = value
-		end
-		
-		request.filename = string.sub (request.uri, 1, i -1)
-	end
 	
 	return request
 end
@@ -61,8 +74,17 @@ local function read_request (client)
 
 	request.header = table.concat(raw_headers)
 
-	if request.filename == "/" then
-		request.filename = "/index.lua"
+	request.filename, request.args = parse_uri(request.uri)
+
+	for k,i in ipairs(aliases) do
+		if request.filename == i.name then
+			if i.uri then 
+				request.uri = i.uri
+				request.filename, request.args = parse_uri(request.uri)
+			end
+			if i.aliase then request.filename = i.aliase end
+			break
+		end
 	end
 
 	return request
@@ -109,10 +131,8 @@ while 1 do
 			}
 		}
 		local request = read_request(client)
+		io.write(("[INFO] %s request to %s\n"):format(request.method, request.filename))
 		local is_script = string.find(request.filename, ".lua") and true
-		
-		io.write(("[INFO] %s request to %s%s\n"):format(request.method, request.filename, is_script and ". Execute." or ""))
-		
 		
 		if request.method == "GET" then
 			if is_script then 	-- если обратились к lua фалу
@@ -127,20 +147,19 @@ while 1 do
 				f, err = loadfile(ROOT_DIR..request.filename, "t", env) 	-- загрузка скрипта
 				if f then
 					stat, ret = pcall(f, request) 	-- выполняем скрипт
+					if stat then
+						tmp_f:seek ("set")
+						f = tmp_f
+					else
+						io.stderr:write("[ERROR] "..ret.."\n")
+						f = nil
+						response.code = 500
+						response.mess = "Script error"
+					end
 				else
 					io.stderr:write("[ERROR] "..err)
 					response.code = 500
 					response.mess = "Open file error"
-				end
-
-				if stat then
-					tmp_f:seek ("set")
-					f = tmp_f
-				else
-					io.stderr:write("[ERROR] "..ret)
-					f = nil
-					response.code = 500
-					response.mess = "Script error"
 				end
 			else 	-- иначе
 				f = io.open(ROOT_DIR..request.filename) 	-- открываем файл для чтения
