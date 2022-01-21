@@ -24,6 +24,14 @@ if aliases_file then
 	aliases = aliases_file()
 end
 
+local function unescape (s)
+  s = string.gsub(s, "+", " ")
+  s = string.gsub(s, "%%(%x%x)", function (h)
+        return string.char(tonumber(h, 16))
+      end)
+  return s
+end
+
 -- Делим ссылку на имя файла и аргументы
 local function parse_uri (uri)
 	local i = string.find (uri, "?")
@@ -31,8 +39,8 @@ local function parse_uri (uri)
 		local args_str = string.sub (uri, i + 1)
 		local args = {}
 		
-		for key, value in string.gmatch(args_str, "(%w+)=(%w+)") do
-			args[key] = value
+		for key, value in string.gmatch(args_str, "([^&=?]+)=([^&=?]+)") do
+			args[key] = unescape(value)
 		end
 		
 		return string.sub (uri, 1, i -1), args
