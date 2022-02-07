@@ -1,19 +1,26 @@
-local base = [[<!DOCTYPE html>
+local base_head = [[<!DOCTYPE html>
 <html lang='ru'><!-- Noncompliant -->
     <head>
         <title>File not found</title>
         <meta content="text/html; charset=utf-8" />
     </head>
-    <body>
-        %s
-    </body>
-</html>]]
+    <body>]]
 
 local file = io.open(request.args.name, "rb")
 if file then
+	local data_lenghth = file:seek ("end")
 	response.headers["Content-Type"] = "application/octet-stream"
 	response.headers["Content-Disposition"] = "attachment; filename="..request.args.name
-	io.html:write(file:read("*a"))
+	response.headers["Content-Length"] = tostring (data_lenghth)
+	send_response(response)
+
+	file:seek("set")
+	for l in file:lines(1024) do
+		coroutine.yield(l)
+	end
 else
-	io.html:write(base:format("<p>File ".. request.args.name .." not found</p>"))
+	send_response(response)
+	coroutine.yield(base_head)
+	coroutine.yield("<p>File ".. request.args.name .." not found</p>")
+	coroutine.yield("</body>\n</html>")
 end
