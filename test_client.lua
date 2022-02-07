@@ -2,6 +2,7 @@ local socket = require "socket"
 
 IP = "localhost"
 PORT = 8080
+local total_size = 0
 
 local function receive (connection)
 	connection:settimeout(0)
@@ -23,7 +24,8 @@ local function download (host, file)
 		if status == "closed" then break end
 	end
 	c:close()
-	print(file, count)
+	total_size = total_size + count
+	--print(file, count)
 end
 
 threads = {}
@@ -65,14 +67,21 @@ function dispatch ()
 	end
 end
 
-for i=1, 100 do
-get(IP, "/index.lua")
-get(IP, "/dump-headers.lua")
-get(IP, "/test.html")
+local files = {
+	"/index.lua",
+	"/dump-headers.lua",
+	"/test.html",
+}
+
+for i=1, 1000 do
+	get (IP, files[math.random(4)])
 end
 
-local clock = os.clock()
+local threads_count = #threads
+
+local clock = os.time() + os.clock()
 
 dispatch()
 
-print(os.clock() - clock)
+local difftime = os.clock() + os.time() - clock
+print(("Reqeusts = %d Time = %.2f\nRPS = %.2f\nTotal size = %d Speed = %.2fkB/s"):format(threads_count, difftime, 1 / difftime * threads_count, total_size, 1/difftime * total_size / 1000))

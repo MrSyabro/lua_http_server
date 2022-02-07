@@ -9,7 +9,7 @@ PORT=8080
 ---The parameter backlog specifies the number of client connections
 -- that can be queued waiting for service. If the queue is full and
 -- another client attempts connection, the connection is refused.
-BACKLOG=100
+BACKLOG=10
 -- Этот параметр определяет, где сервер буде искать файлы.
 ROOT_DIR="./"
 --}}Options
@@ -216,7 +216,6 @@ while true do
 		local request, err = read_request(client)
 		if request then
 			if request.method == "GET" then
-				print ("[INFO] Creating new thread..")
 
 				local thread = {
 					client = client,
@@ -241,7 +240,6 @@ while true do
 					t.client:send (("HTTP/1.1 %d %s\n\r\n\r"):format (500, "Internal server error"))
 				end
 			else
-				print("[INFO] Thread #"..threads.current.." dead")
 				t.client:close()
 				table.remove(threads, threads.current)
 			end
