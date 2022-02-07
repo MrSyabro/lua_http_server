@@ -9,7 +9,7 @@ PORT=8080
 ---The parameter backlog specifies the number of client connections
 -- that can be queued waiting for service. If the queue is full and
 -- another client attempts connection, the connection is refused.
-BACKLOG=5
+BACKLOG=100
 -- Этот параметр определяет, где сервер буде искать файлы.
 ROOT_DIR="./"
 --}}Options
@@ -39,7 +39,8 @@ local function parse_uri (uri)
 		local args_str = string.sub (uri, i + 1)
 		local args = {}
 		
-		for key, value in string.gmatch(args_str, "([^&=?]+)=([^&=?]+)") do
+		for key, value in string.gmatch(args_str,
+			"([^&=?]+)=([^&=?]+)") do
 			args[key] = unescape(value)
 		end
 		
@@ -78,7 +79,8 @@ local function read_request (client)
 			reading = (header_line ~= "" and header_line ~= nil)
 			if reading then
 				table.insert(raw_headers, header_line)
-				local key, value = string.match (header_line, "(%g+): ([%g ]+)")
+				local key, value = string.match (header_line,
+					"(%g+): ([%g ]+)")
 				if key then
 					request.headers[key:lower()] = value
 				end
@@ -93,7 +95,8 @@ local function read_request (client)
 			if request.filename == i.name then
 				if i.uri then 
 					request.uri = i.uri
-					request.filename, request.args = parse_uri(request.uri)
+					request.filename, request.args =
+						parse_uri(request.uri)
 				end
 				if i.aliase then request.filename = i.aliase end
 				break
@@ -106,27 +109,96 @@ local function read_request (client)
 	end
 end
 
-local function send_headers (client, headers)
+local function send_headers (headers)
 	for i, k in pairs(headers) do
 		local header = ("%s: %s\n"):format(i, k)
-		client:send(header)
+		coroutine.yield(header)
 	end
 end
 
-local function send_response (client, response)
-	client:send(("HTTP/1.1 %d %s\n"):format(
+local function send_response (response)
+	coroutine.yield(("HTTP/1.1 %d %s\n"):format(
 		response.code or 200,
 		response.mess or "OK"
 	))
 	
-	send_headers(client, response.headers)
+	send_headers(response.headers)
 	
-	client:send("\n")
+	coroutine.yield("\n")
 end
+
+local function thread_func(request, number)
+	io.write(("[THREAD %d] %s request to %s\n"):format(number,
+		request.method, request.filename))
+	local is_script = string.find(request.filename, ".lua") and true
+
+	if is_script then 	-- если обратились к lua фалу
+		local stat, ret
+
+		local env = _G
+		env.request = request
+		env.send_response = send_response
+		env.send_headers = send_headers
+		env.response = {
+			headers = {
+				["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
+				["Date"] = os.date("!%c GMT")
+			}
+		}
+
+		local script_func, err = loadfile(
+			root_dir..request.filename, "t", env) 			-- загрузка скрипта
+		if script_func then
+			local status, err = pcall(script_func) 			-- выполняем скрипт
+		else
+			io.stderr:write("[ERROR] "..err)
+			response.code = 500
+			response.mess = "Open file error"
+		end
+	else 	-- иначе
+		local response = {
+			headers = {
+				["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
+				["Date"] = os.date("!%c GMT")
+			}
+		}
+
+		local f = io.open(root_dir..request.filename) 			-- открываем файл для чтения
+
+		if f then
+			local data_lenghth = f:seek ("end") f:seek ("set") 	-- Узнаем обьем выходных данных
+			response.headers ["Content-Length"] =
+				tostring (data_lenghth) 			-- ..указываем в заголовке
+
+			send_response(response)
+
+			for d in f:lines(1024) do
+				coroutine.yield(d)
+			end
+
+			f:close()
+		else
+			coroutine.yield(("HTTP/1.1 %d %s\n\n"):format(
+				response.code or 404,
+				response.mess or "Not Found"
+			))
+			coroutine.yield(
+"<!DOCTYPE html><html lang='en'><!-- Noncompliant --><body><h1>"
+..(response.mess or "Not Found").."</h1><br><p>File "
+..request.filename.." not found.</p></body></html>"
+			)
+		end
+	end
+end
+
+local threads = {
+	current = 1
+}
 
 -- create a TCP socket and bind it to the local host, at any port
 server=assert(socket.tcp())
 server:setoption("reuseaddr", true)
+server:settimeout(0)
 assert(server:bind("*", PORT))
 server:listen(BACKLOG)
 
@@ -135,79 +207,50 @@ local ip, port = server:getsockname()
 print("Listening on IP="..ip..", PORT="..port.."...")
 
 -- loop forever waiting for clients
-while 1 do
+while true do
 	-- wait for a connection from any client
 	local client, err = server:accept()
 
 	if client then
-		local f
-		local response = {
-			headers = {
-				["Content-Type"] = "text/html; charset=utf-8" -- По дефолту отправляем html, utf-8
-			}
-		}
 		local request, err = read_request(client)
 		if request then
-			io.write(("[INFO] %s request to %s\n"):format(request.method, request.filename))
-			local is_script = string.find(request.filename, ".lua") and true
-			
 			if request.method == "GET" then
-				if is_script then 	-- если обратились к lua фалу
-					local tmp_f = io.tmpfile() 	-- времнный файл для вывода
-					local stat, ret
+				print ("[INFO] Creating new thread..")
 
-					local env = _G
-					env.io.html = tmp_f
-					env.request = request
-					env.response = response
+				local thread = {
+					client = client,
+					request = request,
+					thread = coroutine.create(thread_func)
+				}
 
-					f, err = loadfile(root_dir..request.filename, "t", env) 	-- загрузка скрипта
-					if f then
-						stat, ret = pcall(f) 	-- выполняем скрипт
-						if stat then
-							tmp_f:seek ("set")
-							f = tmp_f
-						else
-							io.stderr:write("[ERROR] "..ret.."\n")
-							f = nil
-							response.code = 500
-							response.mess = "Script error"
-						end
-					else
-						io.stderr:write("[ERROR] "..err)
-						response.code = 500
-						response.mess = "Open file error"
-					end
-				else 	-- иначе
-					f = io.open(root_dir..request.filename) 	-- открываем файл для чтения
-				end
-			end
-
-			-- if there was no error, send it back to the client
-			if f then
-				local data_lenghth = f:seek("end") f:seek("set") 	-- Узнаем обьем выходных данных
-				response.headers["Content-Length"] = tostring(data_lenghth) -- ..указываем в заголовке
-				response.headers["Date"] = os.date("!%c GMT")
-
-				send_response(client, response)
-
-				local source = ltn12.source.file(f)
-				local sink = socket.sink("close-when-done", client)
-				ltn12.pump.all(source, sink)
-			else
-				client:send(("HTTP/1.1 %d %s\n\n"):format(
-					response.code or 404,
-					response.mess or "Not Found"
-				))
-				client:send("<!DOCTYPE html><html lang='en'><!-- Noncompliant --><body><h1>"..(response.mess or "Not Found").."</h1><br><p>File "..request.filename.." not found.</p></body></html>")
+				table.insert(threads, thread)
 			end
 		else
 			io.stderr:write("[ERROR] "..err.."\n")
 		end
+	elseif err == "timeout" then
+		if threads.current and threads[threads.current] then
+			local t = threads[threads.current]
+			if coroutine.status(t.thread) == "suspended" then
+				local status, data = coroutine.resume(t.thread, t.request, threads.current)
+				if status and data then t.client:send(data)
+				elseif data then
+					io.stderr:write("[ERROR] "..data.."\n")
+
+					t.client:send (("HTTP/1.1 %d %s\n\r\n\r"):format (500, "Internal server error"))
+				end
+
+				threads.current = threads.current + 1
+				if threads.current > #threads then
+					threads.current = 1
+				end
+			else
+				print("[INFO] Thread #"..threads.current.." dead")
+				t.client:close()
+				table.remove(threads, threads.current)
+			end
+		end
 	else
 		print("Error happened while getting the connection.nError: "..err)
 	end
-
-	-- done with client, close the object
-	client:close()
 end

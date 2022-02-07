@@ -1,11 +1,14 @@
-local base = [[<!DOCTYPE html>
+send_response(response)
+
+coroutine.yield ([[<!DOCTYPE html>
 <html lang='ru'><!-- Noncompliant -->
     <head>
         <title>Request headers</title>
         <meta content="text/html; charset=utf-8" />
     </head>
-    <body>
-        %s
+    <body>]])
+
+local floor_base = [[
     </body>
 </html>]]
 
@@ -21,10 +24,10 @@ local function print_table(t)
     return table.concat(out_table, "\n")
 end
 
-local head = "<h1> Headers </h1><br>"..
+coroutine.yield ("<h1> Headers </h1><br>"..
     "<p>Следующая таблица генерируется из запроса</p>"..
-    "<p>Демонстрирует итеративную динамическую генерацию таблиц</p>"
-local s = print_table(request.headers)
-local body_end = "<br><a href='/'>Home</a>"
+    "<p>Демонстрирует итеративную динамическую генерацию таблиц</p>")
 
-io.html:write(base:format(head..s..body_end))
+coroutine.yield(print_table(request.headers))
+
+coroutine.yield("<br><a href='/'>Home</a>"..floor_base)
