@@ -166,11 +166,12 @@ local function thread_func(request, number)
 		local f = io.open(root_dir..request.filename) 			-- открываем файл для чтения
 
 		if f then
-			local data_lenghth = f:seek ("end") f:seek ("set") 	-- Узнаем обьем выходных данных
+			local data_lenghth = f:seek ("end")		 	-- Узнаем обьем выходных данных
 			response.headers ["Content-Length"] =
 				tostring (data_lenghth) 			-- ..указываем в заголовке
 
 			send_response(response)
+			f:seek ("set")
 
 			for d in f:lines(1024) do
 				coroutine.yield(d)
@@ -239,17 +240,16 @@ while true do
 
 					t.client:send (("HTTP/1.1 %d %s\n\r\n\r"):format (500, "Internal server error"))
 				end
-
-				threads.current = threads.current + 1
-				if threads.current > #threads then
-					threads.current = 1
-				end
 			else
 				print("[INFO] Thread #"..threads.current.." dead")
 				t.client:close()
 				table.remove(threads, threads.current)
 			end
-		end
+			threads.current = threads.current - 1
+			if threads.current < 1 then
+				threads.current = #threads
+			end
+		else threads.current = #threads end
 	else
 		print("Error happened while getting the connection.nError: "..err)
 	end
