@@ -1,6 +1,5 @@
 #!/bin/lua
 local socket = require("socket")
-local ltn12 = require("ltn12")
 local args = {...}
 
 --{{Options
@@ -10,7 +9,7 @@ PORT=8080
 -- that can be queued waiting for service. If the queue is full and
 -- another client attempts connection, the connection is refused.
 BACKLOG=10
--- Этот параметр определяет, где сервер буде искать файлы.
+-- Этот параметр определяет, где сервер будет искать файлы.
 ROOT_DIR="./"
 --}}Options
 
@@ -19,9 +18,12 @@ local root_dir = args[1] or ROOT_DIR
 -- Загружаем короткие имена, если есть.
 local aliases = {}
 
-local aliases_file, err = loadfile("aliases.lua", "t", {})
+local aliases_file, err = loadfile(root_dir.."/aliases.lua", "t", {})
 if aliases_file then
 	aliases = aliases_file()
+	print("[INFO] Aliases loaded")
+else
+	print("[INFO] Aliases not found.")
 end
 
 local function unescape (s)
