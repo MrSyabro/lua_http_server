@@ -1,7 +1,7 @@
 response.headers["Content-Type"] = "application/octet-stream"
 response.headers["Content-Disposition"] = "attachment; filename=payload.bin"
 response.headers["Content-Length"] = tostring((1024*1024*1024))
-send_response(response)
+server.send_response(response)
 
 local str = "UZPPZQKDLBODEHECQVYLWNSDLSCIIIGJVYZRMONZFTVDUGJVDOFVQUQRMZFYWQHDNC\
 GALMGERPTEWTQIGCKCPSSAQCHGJQJGZSMTSUKFZCOKJAQUQUUHSCQLMNLRMSUFLVMBGHUCSUMENBTHT\

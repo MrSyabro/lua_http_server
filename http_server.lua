@@ -48,7 +48,7 @@ local function parse_uri (uri)
 		
 		return string.sub (uri, 1, i -1), args
 	else
-		return uri
+		return uri, {}
 	end
 end
 
@@ -133,38 +133,36 @@ local function thread_func(request, number)
 	io.write(("[THREAD %d] %s request to %s\n"):format(number,
 		request.method, request.filename))
 	local is_script = string.find(request.filename, ".lua") and true
-
+	
+	local response = {
+		headers = {
+			["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
+			["Date"] = os.date("!%c GMT")
+		}
+	}
+	
 	if is_script then 	-- если обратились к lua фалу
 		local stat, ret
 
-		local env = _G
-		env.request = request
-		env.send_response = send_response
-		env.send_headers = send_headers
-		env.response = {
-			headers = {
-				["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
-				["Date"] = os.date("!%c GMT")
-			}
+		local env = setmetatable({}, {__index=_G})
+		env.server = {
+			send_response = send_response,
+			send_headers = send_headers,
+			root_dir = root_dir,
 		}
+		env.request = request
+		env.response = response
 
 		local script_func, err = loadfile(
 			root_dir..request.filename, "t", env) 			-- загрузка скрипта
 		if script_func then
-			local status, err = pcall(script_func) 			-- выполняем скрипт
+			script_func()			 			-- выполняем скрипт
 		else
 			io.stderr:write("[ERROR] "..err)
 			response.code = 500
 			response.mess = "Open file error"
 		end
 	else 	-- иначе
-		local response = {
-			headers = {
-				["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
-				["Date"] = os.date("!%c GMT")
-			}
-		}
-
 		local f = io.open(root_dir..request.filename) 			-- открываем файл для чтения
 
 		if f then
@@ -239,7 +237,7 @@ while true do
 				elseif data then
 					io.stderr:write("[ERROR] "..data.."\n")
 
-					t.client:send (("HTTP/1.1 %d %s\n\r\n\r"):format (500, "Internal server error"))
+					--t.client:send (("HTTP/1.1 %d %s\n\r\n\r"):format (500, "Internal server error"))
 				end
 			else
 				t.client:close()

@@ -1,4 +1,4 @@
-send_response(response)
+server.send_response(response)
 
 coroutine.yield ([[<!DOCTYPE html>
 <html lang='ru'><!-- Noncompliant -->
@@ -12,22 +12,19 @@ local floor_base = [[
     </body>
 </html>]]
 
-local function print_table(t)
-    local out_table = {"<table border='1'>"}
+local function send_table(t)
+    coroutine.yield("<table border='1'>")
     for k,i in pairs(t) do
-        local str = string.format("<tr><td>%s</td><td>%s</td></tr>", k, i)
-        table.insert(out_table, str)
+        coroutine.yield(string.format("<tr><td>%s</td><td>%s</td></tr>", k, i))
     end
 
-    table.insert(out_table, "</table>")
-
-    return table.concat(out_table, "\n")
+    coroutine.yield ("</table>")
 end
 
 coroutine.yield ("<h1> Headers </h1><br>"..
     "<p>Следующая таблица генерируется из запроса</p>"..
     "<p>Демонстрирует итеративную динамическую генерацию таблиц</p>")
 
-coroutine.yield(print_table(request.headers))
+send_table(request.headers)
 
 coroutine.yield("<br><a href='/'>Home</a>"..floor_base)
