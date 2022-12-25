@@ -27,7 +27,6 @@ if cert_file then
 			verify = {"peer"},
 			options = {"all"},
 		}
-		ssl_param = assert(ssll.newcontext(ssl_param))
 		ssl = ssll
 	elseif ssll then
 		print("[WARN] OpennSSL loading error:", ssl)
