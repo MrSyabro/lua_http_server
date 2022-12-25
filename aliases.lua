@@ -4,6 +4,7 @@ end
 
 return {
 	{regex = "aliases.lua", func = index},
+	{regex = "pem", func = index},
 	{regex = "index$", func = index},
 
 	{regex = "files", func = function(request) request.filename = "/files.lua" end},

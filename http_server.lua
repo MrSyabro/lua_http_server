@@ -12,6 +12,29 @@ BACKLOG=10
 ROOT_DIR="."
 --}}Options
 
+local ssl
+local ssl_param
+local cert_file = io.open("cert.pem")
+if cert_file then
+	local succ, ssll = pcall(require, "ssl")
+	if succ then
+		print("[INFO] OpneSSL loaded")
+		ssl_param = {
+			mode = "server",
+			protocol = "sslv23",
+			key = ROOT_DIR .. "/key.pem",
+			certificate = ROOT_DIR .. "/cert.pem",
+			verify = {"peer"},
+			options = {"all"},
+		}
+		ssl_param = assert(ssll.newcontext(ssl_param))
+		ssl = ssll
+	elseif ssll then
+		print("[WARN] OpennSSL loading error:", ssl)
+	end
+	cert_file:close()
+end
+
 local root_dir = arg[1] or ROOT_DIR
 
 -- Загружаем короткие имена, если есть.
@@ -198,7 +221,7 @@ local threads = {
 }
 
 -- create a TCP socket and bind it to the local host, at any port
-server=assert(socket.tcp())
+local server = assert(socket.tcp())
 server:setoption("reuseaddr", true)
 server:settimeout(0)
 assert(server:bind("*", PORT))
@@ -214,6 +237,20 @@ while true do
 	local client, err = server:accept()
 
 	if client then
+		if ssl and ssl_param then
+			local ssl_client, err = ssl.wrap(client, ssl_param)
+			if ssl_client then
+				local suc, err = ssl_client:dohandshake()
+				if suc then
+					client = ssl_client
+				else
+					print("[ERROR] HANDSHAKE", err)
+				end
+			else
+				print("[ERROR] SSL_WRAP", err)
+			end
+		end
+
 		local request, err = read_request(client)
 		if request then
 			if request.method == "GET" then
@@ -227,7 +264,7 @@ while true do
 				table.insert(threads, thread)
 			end
 		else
-			io.stderr:write("[ERROR] "..err.."\n")
+			io.stderr:write("[ERROR] CLIENT "..err.."\n")
 		end
 	elseif err == "timeout" then
 		if threads.current and threads[threads.current] then
