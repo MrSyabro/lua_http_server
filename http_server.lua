@@ -14,7 +14,7 @@ ROOT_DIR="."
 
 local ssl
 local ssl_param
-local cert_file = io.open("cert.pem")
+local cert_file = io.open(ROOT_DIR .. "/cert.pem")
 if cert_file then
 	local succ, ssll = pcall(require, "ssl")
 	if succ then
