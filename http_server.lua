@@ -124,7 +124,6 @@ local function read_request(client)
 
 		for _, rule in ipairs(rules) do
 			if request.filename:match(rule.regex) then
-				print("[INFO] Find rule for", rule.regex)
 				rule.func(request, response)
 			end
 		end
@@ -154,8 +153,6 @@ local function send_response (response)
 end
 
 local function thread_func(request, response, number)
-	io.write(("[THREAD %d] %s request to %s\n"):format(number,
-		request.method, request.filename))
 	local is_script = string.find(request.filename, ".lua") and true
 	
 	if is_script then 	-- если обратились к lua фалу
@@ -217,7 +214,7 @@ local threads = {
 local server = assert(socket.tcp())
 server:setoption("reuseaddr", true)
 server:settimeout(0)
-assert(server:bind("*", PORT))
+assert(server:bind("0.0.0.0", PORT))
 server:listen(BACKLOG)
 
 -- Print IP and port
