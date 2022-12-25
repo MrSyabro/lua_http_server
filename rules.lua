@@ -3,7 +3,7 @@ local function index(request)
 end
 
 return {
-	{regex = "aliases.lua", func = index},
+	{regex = "rules.lua", func = index},
 	{regex = "pem", func = index},
 	{regex = "index$", func = index},
 
