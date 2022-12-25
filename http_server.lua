@@ -10,7 +10,7 @@ PORT=8080
 -- another client attempts connection, the connection is refused.
 BACKLOG=10
 -- Этот параметр определяет, где сервер будет искать файлы.
-ROOT_DIR="./"
+ROOT_DIR="."
 --}}Options
 
 local root_dir = args[1] or ROOT_DIR
@@ -22,6 +22,8 @@ local aliases_file, err = loadfile(root_dir.."/aliases.lua", "t", {})
 if aliases_file then
 	aliases = aliases_file()
 	print("[INFO] Aliases loaded")
+elseif err then
+	print("[ERROR]", err)
 else
 	print("[INFO] Aliases not found.")
 end
@@ -93,16 +95,8 @@ local function read_request (client)
 
 		request.filename, request.args = parse_uri(request.uri)
 
-		for k,i in ipairs(aliases) do
-			if request.filename == i.name then
-				if i.uri then 
-					request.uri = i.uri
-					request.filename, request.args =
-						parse_uri(request.uri)
-				end
-				if i.aliase then request.filename = i.aliase end
-				break
-			end
+		if aliases[request.filename] then
+			aliases[request.filename](request)
 		end
 
 		return request

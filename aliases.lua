@@ -1,9 +1,13 @@
-local aliases = {
-	{name = "/aliases.lua", 	aliase = "/index.lua"},
-	{name = "/", 			aliase = "/index.lua"},
-	{name = "/dump-headers", 	aliase = "/dump-headers.lua"},
-	{name = "/getfile", 		aliase = "/getfile.lua"},
-	{name = "/files", 		aliase = "/files.lua"}
-}
+local function index(request)
+	request.filename = "/index.lua"
+end
 
-return aliases
+return {
+	["/aliases.lua"] = index,
+	["/index"] = index,
+	["/"] = index,
+
+	["/files"] = function(request) request.filename = "/files.lua" end,
+	["/dump-headers"] = function(request) request.filename = "/dump-headers.lua" end,
+	["/getfile"] = function(request) request.filename = "/getfile.lua" end,
+}
