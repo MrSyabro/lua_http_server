@@ -3,11 +3,12 @@ local function index(request)
 end
 
 return {
-	["/aliases.lua"] = index,
-	["/index"] = index,
-	["/"] = index,
+	{regex = "aliases.lua", func = index},
+	{regex = "index$", func = index},
 
-	["/files"] = function(request) request.filename = "/files.lua" end,
-	["/dump-headers"] = function(request) request.filename = "/dump-headers.lua" end,
-	["/getfile"] = function(request) request.filename = "/getfile.lua" end,
+	{regex = "files", func = function(request) request.filename = "/files.lua" end},
+	{regex = "dump%-headers", func = function(request) request.filename = "/dump-headers.lua" end},
+	{regex = "getfile", func = function(request) request.filename = "/getfile.lua" end},
+
+	{regex = "/$", func = index},
 }

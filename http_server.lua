@@ -1,6 +1,5 @@
 #!/bin/lua
 local socket = require("socket")
-local args = {...}
 
 --{{Options
 ---The port number for the HTTP server. Default is 80
@@ -13,7 +12,7 @@ BACKLOG=10
 ROOT_DIR="."
 --}}Options
 
-local root_dir = args[1] or ROOT_DIR
+local root_dir = arg[1] or ROOT_DIR
 
 -- Загружаем короткие имена, если есть.
 local aliases = {}
@@ -70,6 +69,15 @@ local function parse_start_line(start_line)
 	return request
 end
 
+local function find_alias(filename)
+	for _, alias in ipairs(aliases) do
+		if filename:match(alias.regex) then
+			print("[INFO] Find alias for", alias.regex)
+			return alias.func
+		end
+	end
+end
+
 local function read_request (client)
  	local start_line, err = client:receive("*l")
 	if start_line then
@@ -95,9 +103,8 @@ local function read_request (client)
 
 		request.filename, request.args = parse_uri(request.uri)
 
-		if aliases[request.filename] then
-			aliases[request.filename](request)
-		end
+		local alias_func = find_alias(request.filename)
+		if alias_func then alias_func(request) end
 
 		return request
 	else
