@@ -38,16 +38,16 @@ end
 local root_dir = arg[1] or ROOT_DIR
 
 -- Загружаем короткие имена, если есть.
-local aliases = {}
+local rules = {}
 
-local aliases_file, err = loadfile(root_dir.."/aliases.lua", "t", {})
-if aliases_file then
-	aliases = aliases_file()
-	print("[INFO] Aliases loaded")
+local rulees_file, err = loadfile(root_dir.."/rules.lua", "t", {})
+if rulees_file then
+	rules = rulees_file()
+	print("[INFO] Rules loaded")
 elseif err then
 	print("[ERROR]", err)
 else
-	print("[INFO] Aliases not found.")
+	print("[INFO] Rules not found.")
 end
 
 local function unescape (s)
@@ -92,18 +92,15 @@ local function parse_start_line(start_line)
 	return request
 end
 
-local function find_alias(filename)
-	for _, alias in ipairs(aliases) do
-		if filename:match(alias.regex) then
-			print("[INFO] Find alias for", alias.regex)
-			return alias.func
-		end
-	end
-end
-
-local function read_request (client)
+local function read_request(client)
  	local start_line, err = client:receive("*l")
 	if start_line then
+		local response = {
+			headers = {
+				["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
+				["Date"] = os.date("!%c GMT")
+			}
+		}
 		local request = parse_start_line(start_line)
 		local raw_headers = {}
 		request.headers = {}
@@ -126,10 +123,14 @@ local function read_request (client)
 
 		request.filename, request.args = parse_uri(request.uri)
 
-		local alias_func = find_alias(request.filename)
-		if alias_func then alias_func(request) end
+		for _, rule in ipairs(rules) do
+			if request.filename:match(rule.regex) then
+				print("[INFO] Find rule for", rule.regex)
+				rule.func(request, response)
+			end
+		end
 
-		return request
+		return request, response
 	else
 		return nil, err
 	end
@@ -153,17 +154,10 @@ local function send_response (response)
 	coroutine.yield("\n")
 end
 
-local function thread_func(request, number)
+local function thread_func(request, response, number)
 	io.write(("[THREAD %d] %s request to %s\n"):format(number,
 		request.method, request.filename))
 	local is_script = string.find(request.filename, ".lua") and true
-	
-	local response = {
-		headers = {
-			["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
-			["Date"] = os.date("!%c GMT")
-		}
-	}
 	
 	if is_script then 	-- если обратились к lua фалу
 		local stat, ret
@@ -251,13 +245,14 @@ while true do
 			end
 		end
 
-		local request, err = read_request(client)
+		local request, response, err = read_request(client)
 		if request then
 			if request.method == "GET" then
 
 				local thread = {
 					client = client,
 					request = request,
+					response = response,
 					thread = coroutine.create(thread_func)
 				}
 
@@ -270,7 +265,7 @@ while true do
 		if threads.current and threads[threads.current] then
 			local t = threads[threads.current]
 			if coroutine.status(t.thread) == "suspended" then
-				local status, data = coroutine.resume(t.thread, t.request, threads.current)
+				local status, data = coroutine.resume(t.thread, t.request, t.response, threads.current)
 				if status and data then t.client:send(data)
 				elseif data then
 					io.stderr:write("[ERROR] "..data.."\n")
