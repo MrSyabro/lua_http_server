@@ -9,7 +9,7 @@ PORT=8080
 -- another client attempts connection, the connection is refused.
 BACKLOG=10
 -- Этот параметр определяет, где сервер будет искать файлы.
-ROOT_DIR="."
+ROOT_DIR=arg[1] or "."
 --}}Options
 
 local ssl
@@ -33,14 +33,14 @@ if cert_file then
 		print("[WARN] OpennSSL loading error:", ssl)
 	end
 	cert_file:close()
+else
+	print("[INFO] SSL disable")
 end
-
-local root_dir = arg[1] or ROOT_DIR
 
 -- Загружаем короткие имена, если есть.
 local rules = {}
 
-local rulees_file, err = loadfile(root_dir.."/rules.lua", "t", {})
+local rulees_file, err = loadfile(ROOT_DIR.."/rules.lua", "t", {})
 if rulees_file then
 	rules = rulees_file()
 	print("[INFO] Rules loaded")
@@ -166,13 +166,13 @@ local function thread_func(request, response, number)
 		env.server = {
 			send_response = send_response,
 			send_headers = send_headers,
-			root_dir = root_dir,
+			ROOT_DIR = ROOT_DIR,
 		}
 		env.request = request
 		env.response = response
 
 		local script_func, err = loadfile(
-			root_dir..request.filename, "t", env) 			-- загрузка скрипта
+			ROOT_DIR..request.filename, "t", env) 			-- загрузка скрипта
 		if script_func then
 			script_func()			 			-- выполняем скрипт
 		else
@@ -181,7 +181,7 @@ local function thread_func(request, response, number)
 			response.mess = "Open file error"
 		end
 	else 	-- иначе
-		local f = io.open(root_dir..request.filename) 			-- открываем файл для чтения
+		local f = io.open(ROOT_DIR..request.filename) 			-- открываем файл для чтения
 
 		if f then
 			local data_lenghth = f:seek ("end")		 	-- Узнаем обьем выходных данных
