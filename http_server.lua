@@ -245,7 +245,7 @@ while true do
 			end
 		end
 
-		local request, response, err = read_request(client)
+		local request, response = read_request(client)
 		if request then
 			if request.method == "GET" then
 
@@ -259,7 +259,7 @@ while true do
 				table.insert(threads, thread)
 			end
 		else
-			io.stderr:write("[ERROR] CLIENT "..err.."\n")
+			io.stderr:write("[ERROR] CLIENT "..response.."\n")
 		end
 	elseif err == "timeout" then
 		if threads.current and threads[threads.current] then
