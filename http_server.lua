@@ -1,4 +1,4 @@
-#!/bin/lua
+#!/usr/bin/env lua
 local socket = require("socket")
 
 --{{Options
