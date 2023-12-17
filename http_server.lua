@@ -78,10 +78,7 @@ end
 local start_line_fmt = "(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)"
 local function parse_start_line(start_line)
 	local request = {}
-
 	request.method, request.uri, request.protoname, request.protover = start_line:match(start_line_fmt)
-	request.filename = request.uri
-
 	return request
 end
 
@@ -112,7 +109,7 @@ local function read_request(client)
 		elseif err == "timeout" then
 			coroutine.yield()
 		else
-			io.write("[ERROR] Client " .. err)
+			io.stderr:write("[ERROR] Client " .. err)
 			return nil
 		end
 	until start_line
@@ -263,9 +260,6 @@ local function thread_func(threaddata)
 					.. request.filename .. " not found.</p></body></html>")
 			end
 		end
-
-	else
-		io.stderr:write("[ERROR] CLIENT aboba\n")
 	end
 end
 
