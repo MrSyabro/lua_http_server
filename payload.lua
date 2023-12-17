@@ -1,7 +1,7 @@
 response.headers["Content-Type"] = "application/octet-stream"
 response.headers["Content-Disposition"] = "attachment; filename=payload.bin"
 response.headers["Content-Length"] = tostring((1024*1024*1024))
-server.send_response(response)
+server:sendheaders()
 
 local str = "UZPPZQKDLBODEHECQVYLWNSDLSCIIIGJVYZRMONZFTVDUGJVDOFVQUQRMZFYWQHDNC\
 GALMGERPTEWTQIGCKCPSSAQCHGJQJGZSMTSUKFZCOKJAQUQUUHSCQLMNLRMSUFLVMBGHUCSUMENBTHT\
@@ -19,5 +19,6 @@ TNNJVWZYTXCDMWMOKWZEYNXRPDBSZCVTJFKAMZNGKMYPKVVHTPKIRZAUMOIMFZYYHQHWGXGXUUUEIPU\
 NQJZTWPWEH"
 
 for i=1, (1024*1024) do
-	coroutine.yield(str)
+	client:send(str)
+	coroutine.yield()
 end

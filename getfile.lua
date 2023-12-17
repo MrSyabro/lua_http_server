@@ -1,5 +1,5 @@
 local base_head = [[<!DOCTYPE html>
-<html lang='ru'><!-- Noncompliant -->
+<html lang='ru'>
     <head>
         <title>File not found</title>
         <meta content="text/html; charset=utf-8" />
@@ -12,15 +12,15 @@ if file then
 	response.headers["Content-Type"] = "application/octet-stream"
 	response.headers["Content-Disposition"] = "attachment; filename="..request.args.name
 	response.headers["Content-Length"] = tostring (data_lenghth)
-	server.send_response(response)
+	server:sendheaders()
 
 	file:seek("set")
 	for l in file:lines(1024*1024) do
-		coroutine.yield(l)
+		client:send(l)
+		coroutine.yield()
 	end
 else
-	server.send_response(response)
-	coroutine.yield(base_head)
-	coroutine.yield("<p>File ".. request.args.name .." not found</p>")
-	coroutine.yield("</body>\n</html>")
+	echo(base_head)
+	echo("<p>File ".. request.args.name .." not found</p>")
+	echo("</body>\n</html>")
 end

@@ -1,5 +1,4 @@
 local h = require "html"
-server.send_response(response)
 
 local list = {
     {
@@ -44,9 +43,8 @@ local input = h.div(nil, h.form({
     h.p(nil, "Введите фамилию: ", h.input {type="text", name="lastname"}),
     h.input {type="submit", value="Отправить"}
 ))
-
-coroutine.yield(h.doctype())
-coroutine.yield(h.html(nil,
+echo(h.doctype())
+echo(h.html(nil,
     h.head(nil,
         h.meta { content="text/html; charset=utf-8" },
         h.link { rel="stylesheet", href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" },

@@ -3,13 +3,13 @@ local socket = require("socket")
 
 --{{Options
 ---The port number for the HTTP server. Default is 80
-PORT=8080
+PORT = 8080
 ---The parameter backlog specifies the number of client connections
 -- that can be queued waiting for service. If the queue is full and
 -- another client attempts connection, the connection is refused.
-BACKLOG=10
+BACKLOG = 10
 -- Этот параметр определяет, где сервер будет искать файлы.
-ROOT_DIR=arg[1] or "."
+ROOT_DIR = arg[1] or "."
 --}}Options
 
 local ssl
@@ -24,8 +24,8 @@ if cert_file then
 			protocol = "sslv23",
 			key = ROOT_DIR .. "/key.pem",
 			certificate = ROOT_DIR .. "/cert.pem",
-			verify = {"peer"},
-			options = {"all"},
+			verify = { "peer" },
+			options = { "all" },
 		}
 		ssl = ssll
 	elseif ssll then
@@ -36,12 +36,11 @@ else
 	print("[INFO] SSL disable")
 end
 
--- Загружаем короткие имена, если есть.
 local rules = {}
 
-local rulees_file, err = loadfile(ROOT_DIR.."/rules.lua", "t", {})
-if rulees_file then
-	rules = rulees_file()
+local rules_file, err = loadfile(ROOT_DIR .. "/rules.lua", "t", {})
+if rules_file then
+	rules = rules_file()
 	print("[INFO] Rules loaded")
 elseif err then
 	print("[ERROR]", err)
@@ -49,56 +48,56 @@ else
 	print("[INFO] Rules not found.")
 end
 
-local function unescape (s)
-  s = string.gsub(s, "+", " ")
-  s = string.gsub(s, "%%(%x%x)", function (h)
-        return string.char(tonumber(h, 16))
-      end)
-  return s
+local function unescape(s)
+	s = string.gsub(s, "+", " ")
+	s = string.gsub(s, "%%(%x%x)", function(h)
+		return string.char(tonumber(h, 16))
+	end)
+	return s
 end
 
 -- Делим ссылку на имя файла и аргументы
-local function parse_uri (uri)
-	local i = string.find (uri, "?")
+local args_fmt = "([^&=?]+)=([^&=?]+)"
+local function parse_uri(uri)
+	local i = string.find(uri, "?")
 	if i then
-		local args_str = string.sub (uri, i + 1)
+		local args_str = string.sub(uri, i + 1)
 		local args = {}
-		
+
 		for key, value in string.gmatch(args_str,
-			"([^&=?]+)=([^&=?]+)") do
+			args_fmt) do
 			args[key] = unescape(value)
 		end
-		
-		return string.sub (uri, 1, i -1), args
+
+		return string.sub(uri, 1, i - 1), args
 	else
 		return uri, {}
 	end
 end
 
 local function parse_start_line(start_line)
-	local _request = {}
 	local request = {}
-	
-	for word in string.gmatch(start_line, "%g+") do
-		table.insert(_request, word)
-	end
-	
-	request.method = _request[1]
-	request.uri = _request[2]
-	request.filename = _request[2]
-	request.protocol = _request[3]
-	
+
+	request.method, request.uri, request.protoname, request.protover = start_line:match("(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)")
+	request.filename = request.uri
+
 	return request
 end
 
 local function read_request(client)
- 	local start_line, err = client:receive("*l")
+	client:settimeout(0)
+	print(client:gettimeout())
+	local start_line, err = client:receive("*l")
 	if start_line then
 		local response = {
 			headers = {
-				["Content-Type"] = "text/html; charset=utf-8", 	-- По дефолту отправляем html, utf-8
-				["Date"] = os.date("!%c GMT")
-			}
+				["Content-Type"] = "text/html; charset=utf-8", -- По дефолту отправляем html, utf-8
+				["Date"] = os.date("!%c GMT"),
+				["Connection"] = "close",
+			},
+			body = {},
+			code = 200,
+			mess = "OK",
 		}
 		local request = parse_start_line(start_line)
 		local raw_headers = {}
@@ -110,7 +109,7 @@ local function read_request(client)
 			reading = (header_line ~= "" and header_line ~= nil)
 			if reading then
 				table.insert(raw_headers, header_line)
-				local key, value = string.match (header_line,
+				local key, value = string.match(header_line,
 					"(%g+): ([%g ]+)")
 				if key then
 					request.headers[key:lower()] = value
@@ -134,81 +133,148 @@ local function read_request(client)
 	end
 end
 
-local function send_headers (headers)
+local startline_fmt = "HTTP/1.0 %d %s\n"
+local function resp_startline(code, mess)
+	return startline_fmt:format(code, mess)
+end
+
+local header_fmt = "%s: %s"
+local function concat_headers(headers)
+	local out = {}
 	for i, k in pairs(headers) do
-		local header = ("%s: %s\n"):format(i, k)
-		coroutine.yield(header)
+		local header = (header_fmt):format(i, k)
+		table.insert(out, header)
 	end
+	return table.concat(out, "\n")
 end
 
-local function send_response (response)
-	coroutine.yield(("HTTP/1.1 %d %s\n"):format(
-		response.code or 200,
-		response.mess or "OK"
-	))
-	
-	send_headers(response.headers)
-	
-	coroutine.yield("\n")
+---@class Server
+---@field closed boolean?
+---@field startline_sended boolean?
+---@field header_sended boolean?
+---@field body_sended boolean?
+---@field client table Socket.TCP клиент
+---@field request table
+---@field response table
+---@field thread thread
+local server_obj = {}
+
+---Отсылает стартовую строку
+function server_obj:sendstartline()
+	if self.startline_sended then return end
+	self.client:send(resp_startline(self.response.code, self.response.mess))
+	self.startline_sended = true
 end
 
-local function thread_func(request, response, number)
-	local is_script = string.find(request.filename, ".lua") and true
-	
-	if is_script then 	-- если обратились к lua фалу
-		local stat, ret
+---Отсылает, если надо, заголовки
+function server_obj:sendheaders()
+	local response = self.response
+	if response.header_sended == true then return end
+	local out = concat_headers(response.headers) .. "\n\n"
+	self:sendstartline()
+	self.client:send(out)
+	response.header_sended = true
+end
 
-		local env = setmetatable({}, {__index=_G})
-		env.server = {
-			send_response = send_response,
-			send_headers = send_headers,
-			ROOT_DIR = ROOT_DIR,
-		}
-		env.request = request
-		env.response = response
+---Отсылает, если надо, тело, сохраненное в response.body, а перед этим headers
+function server_obj:sendbody()
+	local response = self.response
+	if response.body_sended then return end
+
+	local body, client = response.body, self.client
+	if #body > 0 then
+		local bodytext = table.concat(body)
+		response.headers["Content-Length"] = #bodytext
+		self:sendheaders()
+		client:send(bodytext)
+	else
+		self:sendheaders()
+	end
+
+	response.body_sended = true
+end
+
+---Отсылает, если надо, заголовки и тело страницы, и закрывает соединение
+function server_obj:closecon()
+	if self.closed then return end
+	self:sendbody()
+	self.client:close()
+	self.closed = true
+end
+
+server_obj.__index = server_obj
+server_obj.ROOT_DIR = ROOT_DIR
+
+local env_mt = { __index = _G }
+---@param thread Server
+---@return function?
+local function thread_func(thread)
+	local filename = thread.request.filename
+	local is_script = string.find(filename, ".lua") and true
+
+	if is_script then -- если обратились к lua фалу
+		local threadenv = setmetatable({
+			server = thread,
+			request = thread.request,
+			response = thread.response,
+			client = thread.client,
+			echo = function(...)
+				local args = table.pack(...)
+				for i = 1, args.n do
+					table.insert(thread.response.body, tostring(args[i]))
+				end
+			end
+		}, env_mt)
 
 		local script_func, err = loadfile(
-			ROOT_DIR..request.filename, "t", env) 			-- загрузка скрипта
+			ROOT_DIR .. filename, "bt", threadenv) -- загрузка скрипта
+
 		if script_func then
-			script_func()			 			-- выполняем скрипт
+			thread:sendstartline()
+			return script_func
 		else
-			io.stderr:write("[ERROR] "..err)
+			local response = thread.response
+			io.stderr:write("[ERROR] " .. err)
 			response.code = 500
-			response.mess = "Open file error"
+			response.mess = "Internal server error"
+
+			table.insert(response.body,
+				"<!DOCTYPE html><html lang='en'><body><h1>Internal server error</h1><br><p>" ..
+				err .. "</p></body></html>")
 		end
-	else 	-- иначе
-		local f = io.open(ROOT_DIR..request.filename) 			-- открываем файл для чтения
+	else
+		local request, response, client = thread.request, thread.response, thread.client
+		local f = io.open(ROOT_DIR .. request.filename, "rb")
 
 		if f then
-			local data_lenghth = f:seek ("end")		 	-- Узнаем обьем выходных данных
-			response.headers ["Content-Length"] =
-				tostring (data_lenghth) 			-- ..указываем в заголовке
+			local data_lenghth = f:seek("end"); f:seek("set")
+			response.headers["Content-Length"] =
+				tostring(data_lenghth)
 
-			send_response(response)
-			f:seek ("set")
+			thread:sendheaders()
 
-			for d in f:lines(1024) do
-				coroutine.yield(d)
+			return function()
+				for d in f:lines(1024 * 1024) do
+					client:send(d)
+					coroutine.yield()
+				end
+
+				f:close()
 			end
-
-			f:close()
 		else
-			coroutine.yield(("HTTP/1.1 %d %s\n\n"):format(
-				response.code or 404,
-				response.mess or "Not Found"
-			))
-			coroutine.yield(
-"<!DOCTYPE html><html lang='en'><!-- Noncompliant --><body><h1>"
-..(response.mess or "Not Found").."</h1><br><p>File "
-..request.filename.." not found.</p></body></html>"
-			)
+			print("[ERROR] Page not found", request.filename)
+			response.code = 404
+			response.mess = "Page not found"
+
+			table.insert(response.body, "<!DOCTYPE html><html lang='en'><body><h1>Page not found</h1><br><p>File "
+				.. request.filename .. " not found.</p></body></html>")
 		end
 	end
 end
 
-local threads = {
-	current = 1
-}
+---@type Server[]
+local threads = {}
+local last_thread = 0
 
 -- create a TCP socket and bind it to the local host, at any port
 local server = assert(socket.tcp())
@@ -219,11 +285,9 @@ server:listen(BACKLOG)
 
 -- Print IP and port
 local ip, port = server:getsockname()
-print("Listening on IP="..ip..", PORT="..port.."...")
+print("Listening on IP=" .. ip .. ", PORT=" .. port .. "...")
 
--- loop forever waiting for clients
 while true do
-	-- wait for a connection from any client
 	local client, err = server:accept()
 
 	if client then
@@ -241,43 +305,62 @@ while true do
 			end
 		end
 
+		print("New client", client)
 		local request, response = read_request(client)
 		if request then
-			if request.method == "GET" then
-
-				local thread = {
-					client = client,
-					request = request,
-					response = response,
-					thread = coroutine.create(thread_func)
-				}
-
-				table.insert(threads, thread)
+			local threaddata = setmetatable({
+				request = request,
+				response = response,
+				client = client,
+			}, server_obj)
+			local fn = thread_func(threaddata)
+			if fn then
+				threaddata.thread = coroutine.create(fn)
+				if last_thread < 1 then
+					--server:settimeout(0)
+					last_thread = 1
+				end
+				print("Adding to pool", client, threaddata)
+				table.insert(threads, threaddata)
+			else
+				print("aboba")
 			end
 		else
-			io.stderr:write("[ERROR] CLIENT "..response.."\n")
-		end
+			io.stderr:write("[ERROR] CLIENT " .. response .. "\n")
+		end --]]
 	elseif err == "timeout" then
-		if threads.current and threads[threads.current] then
-			local t = threads[threads.current]
-			if coroutine.status(t.thread) == "suspended" then
-				local status, data = coroutine.resume(t.thread, t.request, t.response, threads.current)
-				if status and data then t.client:send(data)
-				elseif data then
-					io.stderr:write("[ERROR] "..data.."\n")
+		if last_thread > 0 then
+			local t = threads[last_thread]
+			if t then
+				local cr = t.thread
+				local status, error = coroutine.resume(cr)
+				local crstatus = coroutine.status(cr)
+				if status and crstatus == "dead" then
+					t:closecon()
+					table.remove(threads, last_thread)
+				else
+					if error then
+						io.stderr:write("[ERROR] " .. error .. "\n")
+						t.response.code = 500
+						t.response.mess = "Internal error"
+					end
+					t:closecon()
+					table.remove(threads, last_thread)
+				end
 
-					--t.client:send (("HTTP/1.1 %d %s\n\r\n\r"):format (500, "Internal server error"))
+				last_thread = last_thread - 1
+				if last_thread < 1 and #threads > 0 then
+					last_thread = #threads
 				end
 			else
-				t.client:close()
-				table.remove(threads, threads.current)
+				last_thread = last_thread - 1
 			end
-			threads.current = threads.current - 1
-			if threads.current < 1 then
-				threads.current = #threads
-			end
-		else threads.current = #threads end
+			--[[
+			if last_thread < 1 then
+				server:settimeout(3)
+			end--]]
+		end
 	else
-		print("Error happened while getting the connection.nError: "..err)
+		print("Error happened while getting the connection.nError: " .. err)
 	end
 end
