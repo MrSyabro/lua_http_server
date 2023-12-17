@@ -250,11 +250,11 @@ local function thread_func(threaddata)
 			if script_func then
 				local ret, err = xpcall(script_func, debug.traceback)
 				if not ret then
-					io.stderr:write("[ERROR] " .. err)
+					io.stderr:write("[ERROR] " .. err .. "\n")
 					threaddata:error(500, err)
 				end
 			else
-				io.stderr:write("[ERROR] " .. err)
+				io.stderr:write("[ERROR] " .. err .. "\n")
 				threaddata:error(500, err)
 			end
 		else
