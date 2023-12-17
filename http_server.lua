@@ -12,6 +12,12 @@ BACKLOG = 10
 ROOT_DIR = arg[1] or "."
 --}}Options
 
+local codes = {
+	[200] = "OK",
+	[404] = "Page not found",
+	[500] = "Internal server error",
+}
+
 local ssl
 local ssl_param
 local cert_file = io.open(ROOT_DIR .. "/cert.pem")
@@ -109,7 +115,7 @@ local function read_request(client)
 		elseif err == "timeout" then
 			coroutine.yield()
 		else
-			io.stderr:write("[ERROR] Client " .. err)
+			io.stderr:write("[ERROR] Client " .. err .. "\n")
 			return nil
 		end
 	until start_line
@@ -184,6 +190,23 @@ function server_obj:closecon()
 	self.closed = true
 end
 
+---Отправляет ошибку и закрывает соединение
+---@param code number
+---@param text string
+function server_obj:error(code, text)
+	local response = self.response
+	local err_mess = codes[code]
+	response.code = code
+	response.mess = err_mess
+	if text then
+		text = text:gsub("\n", "<br>")
+	else
+		text = ""
+	end
+	table.insert(response.body,
+		("<!DOCTYPE html><html lang='en'><body><h1>%s</h1><br><p>%s</p></body></html>"):format(err_mess, text))
+end
+
 server_obj.__index = server_obj
 server_obj.ROOT_DIR = ROOT_DIR
 
@@ -225,14 +248,14 @@ local function thread_func(threaddata)
 				ROOT_DIR .. filename, "bt", threadenv) -- загрузка скрипта
 
 			if script_func then
-				script_func()
+				local ret, err = xpcall(script_func, debug.traceback)
+				if not ret then
+					io.stderr:write("[ERROR] " .. err)
+					threaddata:error(500, err)
+				end
 			else
 				io.stderr:write("[ERROR] " .. err)
-				response.code = 500
-				response.mess = "Internal server error"
-				table.insert(response.body,
-					"<!DOCTYPE html><html lang='en'><body><h1>Internal server error</h1><br><p>" ..
-					err .. "</p></body></html>")
+				threaddata:error(500, err)
 			end
 		else
 			local f = io.open(ROOT_DIR .. request.filename, "rb")
@@ -241,10 +264,7 @@ local function thread_func(threaddata)
 				local data_lenghth = f:seek("end"); f:seek("set")
 				response.headers["Content-Length"] =
 					tostring(data_lenghth)
-
 				threaddata:sendheaders()
-
-				
 				for d in f:lines(1024 * 1024) do
 					client:send(d)
 					coroutine.yield()
@@ -253,11 +273,8 @@ local function thread_func(threaddata)
 				f:close()
 			else
 				print("[ERROR] Page not found", request.filename)
-				response.code = 404
-				response.mess = "Page not found"
-
-				table.insert(response.body, "<!DOCTYPE html><html lang='en'><body><h1>Page not found</h1><br><p>File "
-					.. request.filename .. " not found.</p></body></html>")
+				threaddata:error(500, "File "
+					.. request.filename .. " not found.")
 			end
 		end
 	end
@@ -318,10 +335,7 @@ while true do
 			threaddata:closecon()
 		elseif not state then
 			io.stderr:write("[PROCESSOR] Script error without adding to pool: " .. err)
-			threaddata.response.code = 500
-			threaddata.response.mess = "Internal server error"
-			threaddata.response.body = {"<h1>", err, "</h1"}
-			threaddata:closecon()
+			threaddata:error(500, err)
 		else
 			table.insert(threads, threaddata)
 			if last_thread == 0 then last_thread = 1 end
@@ -337,12 +351,8 @@ while true do
 					t:closecon()
 					table.remove(threads, last_thread)
 				elseif status == false then
-					if error then
-						io.stderr:write("[ERROR] " .. error .. " in " .. last_thread .. "\n")
-						t.response.code = 500
-						t.response.mess = "Internal error"
-					end
-					t:closecon()
+					io.stderr:write("[ERROR] " .. error .. " in " .. last_thread .. "\n")
+					t:error(500, err)
 					table.remove(threads, last_thread)
 				end
 

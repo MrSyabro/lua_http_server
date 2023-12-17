@@ -1,4 +1,5 @@
 local h = require "html"
+local head = require "head"
 
 local out = h.p(nil, "Ты шо дурак?")
 if request.args.firstname and request.args.lastname then
@@ -7,10 +8,7 @@ end
 
 echo(h.doctype())
 echo(h.html(nil,
-    h.head(nil,
-        h.meta { content="text/html; charset=utf-8" },
-        h.title(nil, "Aboba 2.0")
-    ),
+    head("GET example"),
     h.body(nil,
         h.h2(nil, "Test page 2"),
         out
