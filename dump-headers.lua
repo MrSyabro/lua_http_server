@@ -1,28 +1,19 @@
-echo([[<!DOCTYPE html>
-<html lang='ru'><!-- Noncompliant -->
-    <head>
-        <title>Request headers</title>
-        <meta content="text/html; charset=utf-8" />
-    </head>
-    <body>]])
+local h = require "html"
+local page = dofile "page.lua"
 
-local floor_base = [[
-    </body>
-</html>]]
+--local list = { class = "list-group list-group-horizontal" }
+local el = { class = "list-group-item" }
+local h5 = { class = "mb-1"}
 
-local function send_table(t)
-    echo("<table border='1'>")
-    for k,i in pairs(t) do
-        echo(string.format("<tr><td>%s</td><td>%s</td></tr>", k, i))
-    end
-
-    echo("</table>")
+local els = {}
+for k, i in pairs(request.headers) do
+    table.insert(els, h.div(el, h.h5(h5, k), h.small(nil, i)))
 end
 
-echo("<h1> Headers </h1><br>"..
-    "<p>Следующая таблица генерируется из запроса</p>"..
-    "<p>Демонстрирует итеративную динамическую генерацию таблиц</p>")
-
-send_table(request.headers)
-
-echo("<br><a href='/'>Home</a>"..floor_base)
+echo(page("Dump headers"),
+    h.div({ class = "container my-5" },
+        h.div({ class = "row" },
+            h.div({ class = "col-lg-8 mx-auto list-group" }, els)
+        )
+    )
+)

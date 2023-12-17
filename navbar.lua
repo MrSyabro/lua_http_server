@@ -2,7 +2,7 @@ local h = require "html"
 
 local menu = {
     {
-        href = "index",
+        href = "/",
         text = "Home",
     },
     {

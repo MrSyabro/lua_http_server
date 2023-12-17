@@ -62,19 +62,25 @@ local function unescape(s)
 	return s
 end
 
--- Делим ссылку на имя файла и аргументы
 local args_fmt = "([^&=?]+)=([^&=?]+)"
+---Парсит аргументы формата www-form-urlencoded
+---@param args_str string
+---@return table
+local function parse_args(args_str)
+	local args = {}
+	for key, value in string.gmatch(args_str,
+		args_fmt) do
+		args[key] = unescape(value)
+	end
+	return args
+end
+
+-- Делим ссылку на имя файла и аргументы
 local function parse_uri(uri)
 	local i = string.find(uri, "?")
 	if i then
 		local args_str = string.sub(uri, i + 1)
-		local args = {}
-
-		for key, value in string.gmatch(args_str,
-			args_fmt) do
-			args[key] = unescape(value)
-		end
-
+		local args = parse_args(args_str)
 		return string.sub(uri, 1, i - 1), args
 	else
 		return uri, {}
@@ -83,7 +89,7 @@ end
 
 local start_line_fmt = "(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)"
 local function parse_start_line(start_line)
-	local request = {}
+	local request = {startline = start_line}
 	request.method, request.uri, request.protoname, request.protover = start_line:match(start_line_fmt)
 	return request
 end
@@ -109,7 +115,7 @@ local function read_request(client)
 					end
 				end
 			end
-			request.header = table.concat(raw_headers)
+			request.header = table.concat(raw_headers, "\n")
 			request.filename, request.args = parse_uri(request.uri)
 			return request
 		elseif err == "timeout" then
@@ -209,6 +215,8 @@ end
 
 server_obj.__index = server_obj
 server_obj.ROOT_DIR = ROOT_DIR
+
+server_obj.parseurlargs = parse_args
 
 local env_mt = { __index = _G }
 ---@param threaddata Server

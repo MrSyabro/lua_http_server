@@ -1,16 +1,26 @@
 local h = require "html"
-local head = require "head"
+local page = dofile "page.lua"
 
-local out = h.p(nil, "Ты шо дурак?")
-if request.args.firstname and request.args.lastname then
-    out = h.p(nil, "Вас зовут: ", h.b(nil, request.args.firstname), " ", h.b(nil, request.args.lastname))
+local lead = {class = "lead"}
+
+local args = request.args
+if request.method == "POST" then
+    local data, err = client:receive(request.headers["content-length"])
+    if data then
+        args = server.parseurlargs(data)
+    end
 end
 
-echo(h.doctype())
-echo(h.html(nil,
-    head("GET example"),
-    h.body(nil,
-        h.h2(nil, "Test page 2"),
+local out = h.p(lead, "Вы не ввели имя или фамилию?")
+if args.firstname and args.lastname then
+    out = h.p(nil, "Вас зовут: ", h.b(nil, args.firstname), " ", h.b(nil, args.lastname))
+end
+
+echo(page("Form out",
+    h.div({ class = "container" },
+        h.h2(nil, "GET/POST example"),
+        h.hr(),
+        h.p(lead, "На этой странице обрабатываются даныне запроса. Ниже отображены введенные в форме данные:"),
         out
     )
 ))

@@ -1,5 +1,7 @@
 local h = require "html"
 
+---@param page_name string тайл страницы
+---@return string
 return function(page_name)
     return h.head(nil,
         h.meta { charset="utf-8" },
