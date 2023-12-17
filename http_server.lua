@@ -75,65 +75,50 @@ local function parse_uri(uri)
 	end
 end
 
+local start_line_fmt = "(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)"
 local function parse_start_line(start_line)
 	local request = {}
 
-	request.method, request.uri, request.protoname, request.protover = start_line:match("(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)")
+	request.method, request.uri, request.protoname, request.protover = start_line:match(start_line_fmt)
 	request.filename = request.uri
 
 	return request
 end
 
+local header_match = "(%g+): ([%g ]+)"
 local function read_request(client)
-	client:settimeout(0)
-	print(client:gettimeout())
-	local start_line, err = client:receive("*l")
-	if start_line then
-		local response = {
-			headers = {
-				["Content-Type"] = "text/html; charset=utf-8", -- По дефолту отправляем html, utf-8
-				["Date"] = os.date("!%c GMT"),
-				["Connection"] = "close",
-			},
-			body = {},
-			code = 200,
-			mess = "OK",
-		}
-		local request = parse_start_line(start_line)
-		local raw_headers = {}
-		request.headers = {}
+	repeat
+		local start_line, err = client:receive("*l")
+		if start_line then
+			local request = parse_start_line(start_line)
+			local raw_headers = {}
+			request.headers = {}
 
-		local reading = true
-		while reading do
-			local header_line, err = client:receive("*l")
-			reading = (header_line ~= "" and header_line ~= nil)
-			if reading then
-				table.insert(raw_headers, header_line)
-				local key, value = string.match(header_line,
-					"(%g+): ([%g ]+)")
-				if key then
-					request.headers[key:lower()] = value
+			local reading = true
+			while reading do
+				local header_line, err = client:receive("*l")
+				reading = (header_line ~= "" and header_line ~= nil)
+				if reading then
+					table.insert(raw_headers, header_line)
+					local key, value = string.match(header_line, header_match)
+					if key then
+						request.headers[key:lower()] = value
+					end
 				end
 			end
+			request.header = table.concat(raw_headers)
+			request.filename, request.args = parse_uri(request.uri)
+			return request
+		elseif err == "timeout" then
+			coroutine.yield()
+		else
+			io.write("[ERROR] Client " .. err)
+			return nil
 		end
-
-		request.header = table.concat(raw_headers)
-
-		request.filename, request.args = parse_uri(request.uri)
-
-		for _, rule in ipairs(rules) do
-			if request.filename:match(rule.regex) then
-				rule.func(request, response)
-			end
-		end
-
-		return request, response
-	else
-		return nil, err
-	end
+	until start_line
 end
 
-local startline_fmt = "HTTP/1.0 %d %s\n"
+local startline_fmt = "HTTP/1.1 %d %s\n"
 local function resp_startline(code, mess)
 	return startline_fmt:format(code, mess)
 end
@@ -169,17 +154,17 @@ end
 ---Отсылает, если надо, заголовки
 function server_obj:sendheaders()
 	local response = self.response
-	if response.header_sended == true then return end
+	if self.header_sended == true then return end
 	local out = concat_headers(response.headers) .. "\n\n"
 	self:sendstartline()
 	self.client:send(out)
-	response.header_sended = true
+	self.header_sended = true
 end
 
 ---Отсылает, если надо, тело, сохраненное в response.body, а перед этим headers
 function server_obj:sendbody()
 	local response = self.response
-	if response.body_sended then return end
+	if self.body_sended then return end
 
 	local body, client = response.body, self.client
 	if #body > 0 then
@@ -191,7 +176,7 @@ function server_obj:sendbody()
 		self:sendheaders()
 	end
 
-	response.body_sended = true
+	self.body_sended = true
 end
 
 ---Отсылает, если надо, заголовки и тело страницы, и закрывает соединение
@@ -206,69 +191,81 @@ server_obj.__index = server_obj
 server_obj.ROOT_DIR = ROOT_DIR
 
 local env_mt = { __index = _G }
----@param thread Server
+---@param threaddata Server
 ---@return function?
-local function thread_func(thread)
-	local filename = thread.request.filename
-	local is_script = string.find(filename, ".lua") and true
-
-	if is_script then -- если обратились к lua фалу
-		local threadenv = setmetatable({
-			server = thread,
-			request = thread.request,
-			response = thread.response,
-			client = thread.client,
-			echo = function(...)
-				local args = table.pack(...)
-				for i = 1, args.n do
-					table.insert(thread.response.body, tostring(args[i]))
-				end
+local function thread_func(threaddata)
+	local client = threaddata.client
+	local response = threaddata.response
+	local request = read_request(client)
+	
+	if request then
+		for _, rule in ipairs(rules) do
+			if request.filename:match(rule.regex) then
+				rule.func(request, response)
 			end
-		}, env_mt)
-
-		local script_func, err = loadfile(
-			ROOT_DIR .. filename, "bt", threadenv) -- загрузка скрипта
-
-		if script_func then
-			thread:sendstartline()
-			return script_func
-		else
-			local response = thread.response
-			io.stderr:write("[ERROR] " .. err)
-			response.code = 500
-			response.mess = "Internal server error"
-
-			table.insert(response.body,
-				"<!DOCTYPE html><html lang='en'><body><h1>Internal server error</h1><br><p>" ..
-				err .. "</p></body></html>")
 		end
-	else
-		local request, response, client = thread.request, thread.response, thread.client
-		local f = io.open(ROOT_DIR .. request.filename, "rb")
+		threaddata.request = request
+		
+		local filename = threaddata.request.filename
+		local is_script = string.find(filename, ".lua") and true
 
-		if f then
-			local data_lenghth = f:seek("end"); f:seek("set")
-			response.headers["Content-Length"] =
-				tostring(data_lenghth)
+		coroutine.yield()
+		if is_script then -- если обратились к lua фалу
+			local threadenv = setmetatable({
+				server = threaddata,
+				request = request,
+				response = response,
+				client = threaddata.client,
+				echo = function(...)
+					local args = table.pack(...)
+					for i = 1, args.n do
+						table.insert(threaddata.response.body, tostring(args[i]))
+					end
+				end
+			}, env_mt)
 
-			thread:sendheaders()
+			local script_func, err = loadfile(
+				ROOT_DIR .. filename, "bt", threadenv) -- загрузка скрипта
 
-			return function()
+			if script_func then
+				script_func()
+			else
+				io.stderr:write("[ERROR] " .. err)
+				response.code = 500
+				response.mess = "Internal server error"
+				table.insert(response.body,
+					"<!DOCTYPE html><html lang='en'><body><h1>Internal server error</h1><br><p>" ..
+					err .. "</p></body></html>")
+			end
+		else
+			local f = io.open(ROOT_DIR .. request.filename, "rb")
+
+			if f then
+				local data_lenghth = f:seek("end"); f:seek("set")
+				response.headers["Content-Length"] =
+					tostring(data_lenghth)
+
+				threaddata:sendheaders()
+
+				
 				for d in f:lines(1024 * 1024) do
 					client:send(d)
 					coroutine.yield()
 				end
 
 				f:close()
-			end
-		else
-			print("[ERROR] Page not found", request.filename)
-			response.code = 404
-			response.mess = "Page not found"
+			else
+				print("[ERROR] Page not found", request.filename)
+				response.code = 404
+				response.mess = "Page not found"
 
-			table.insert(response.body, "<!DOCTYPE html><html lang='en'><body><h1>Page not found</h1><br><p>File "
-				.. request.filename .. " not found.</p></body></html>")
+				table.insert(response.body, "<!DOCTYPE html><html lang='en'><body><h1>Page not found</h1><br><p>File "
+					.. request.filename .. " not found.</p></body></html>")
+			end
 		end
+
+	else
+		io.stderr:write("[ERROR] CLIENT aboba\n")
 	end
 end
 
@@ -304,30 +301,37 @@ while true do
 				print("[ERROR] SSL_WRAP", err)
 			end
 		end
-
-		print("New client", client)
-		local request, response = read_request(client)
-		if request then
-			local threaddata = setmetatable({
-				request = request,
-				response = response,
-				client = client,
-			}, server_obj)
-			local fn = thread_func(threaddata)
-			if fn then
-				threaddata.thread = coroutine.create(fn)
-				if last_thread < 1 then
-					--server:settimeout(0)
-					last_thread = 1
-				end
-				print("Adding to pool", client, threaddata)
-				table.insert(threads, threaddata)
-			else
-				print("aboba")
-			end
+		client:settimeout(0)
+		local newth = coroutine.create(thread_func)
+		local threaddata = setmetatable({
+			client = client,
+			thread = newth,
+			response = {
+				headers = {
+					["Content-Type"] = "text/html; charset=utf-8", -- По дефолту отправляем html, utf-8
+					["Date"] = os.date("!%c GMT"),
+					["Connection"] = "close",
+				},
+				body = {},
+				code = 200,
+				mess = "OK",
+			}
+		}, server_obj)
+		
+		local state, err = coroutine.resume(newth, threaddata)
+		local thstatus = coroutine.status(newth)
+		if state and thstatus == "dead" then
+			threaddata:closecon()
+		elseif not state then
+			io.stderr:write("[PROCESSOR] Script error without adding to pool: " .. err)
+			threaddata.response.code = 500
+			threaddata.response.mess = "Internal server error"
+			threaddata.response.body = {"<h1>", err, "</h1"}
+			threaddata:closecon()
 		else
-			io.stderr:write("[ERROR] CLIENT " .. response .. "\n")
-		end --]]
+			table.insert(threads, threaddata)
+			if last_thread == 0 then last_thread = 1 end
+		end
 	elseif err == "timeout" then
 		if last_thread > 0 then
 			local t = threads[last_thread]
@@ -338,9 +342,9 @@ while true do
 				if status and crstatus == "dead" then
 					t:closecon()
 					table.remove(threads, last_thread)
-				else
+				elseif status == false then
 					if error then
-						io.stderr:write("[ERROR] " .. error .. "\n")
+						io.stderr:write("[ERROR] " .. error .. " in " .. last_thread .. "\n")
 						t.response.code = 500
 						t.response.mess = "Internal error"
 					end
@@ -354,11 +358,8 @@ while true do
 				end
 			else
 				last_thread = last_thread - 1
+				if last_thread < 1 then last_thread = #threads end
 			end
-			--[[
-			if last_thread < 1 then
-				server:settimeout(3)
-			end--]]
 		end
 	else
 		print("Error happened while getting the connection.nError: " .. err)
