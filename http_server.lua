@@ -38,17 +38,8 @@ else
 	print("[INFO] SSL disable")
 end
 
----@enum ServerStates
-ServerStates = {
-	NONE = 0,
-	SEND = 1,
-	RECV = 2,
-	WAIT = 3,
-}
-
 local recvt = {}
 local sendt = {}
-local pool = {}
 
 function table.search(list, data)
 	for i, d in ipairs(list) do
@@ -172,7 +163,6 @@ end
 ---@class Server
 ---@field receiving boolean стоит ли клиент в очереди на чтение данных
 ---@field sending boolean стоит ли клиент в очереди на отправку данных
----@field looping boolean стоит ли клиент в общей очереди процессов (запускается )
 ---@field closed boolean?
 ---@field startline_sended boolean?
 ---@field header_sended boolean?
@@ -185,7 +175,6 @@ end
 local server_obj = {}
 server_obj.receiving = true
 server_obj.sending = false
-server_obj.looping = false
 server_obj.datagramsize = socket._DATAGRAMSIZE
 
 ---Добавить клиента в очеред на получение данных
@@ -210,18 +199,6 @@ function server_obj:setsending(state)
 		table.insert(sendt, self.client)
 	end
 	self.sending = state or false
-end
-
----Добавить в пул процессов для асинхронного выполнения
----@param state boolean
-function server_obj:setlooping(state)
-	if self.looping == state then return end
-	if self.looping then
-		table.removedata(pool, self.client)
-	else
-		table.insert(pool, self.client)
-	end
-	self.looping = state or false
 end
 
 ---Отсылает стартовую строку
@@ -400,7 +377,7 @@ end
 -- create a TCP socket and bind it to the local host, at any port
 local server = assert(socket.tcp())
 server:setoption("reuseaddr", true)
-server:settimeout(0)
+server:settimeout(300)
 assert(server:bind("0.0.0.0", PORT))
 server:listen(socket._SETSIZE)
 print("[INFO] Max connections count", socket._SETSIZE)
@@ -446,18 +423,18 @@ while true do
 		
 		threads[client] = threaddata
 		table.insert(recvt, client)
+		server:settimeout(0)
 		coroutine.resume(newth, threaddata)
 	elseif err == "timeout" then
 		if #recvt > 0 or #sendt > 0 then
-			local readyread, readysend, err = socket.select(recvt, sendt, 0.01)
+			local readyread, readysend, err = socket.select(recvt, sendt, 0)
 			if err ~= "timeout" then
 				process_subpool(readyread, recvt)
 				process_subpool(readysend, sendt)
 			end
 		else
-			if #pool == 0 then socket.sleep(0.01) end
+			server:settimeout(300)--if #pool == 0 then socket.sleep(0.01) end
 		end
-		process_subpool(pool, pool)
 	else
 		print("Error happened while getting the connection.nError: " .. err)
 	end
