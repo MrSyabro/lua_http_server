@@ -170,8 +170,9 @@ local function concat_headers(headers)
 end
 
 ---@class Server
----@field receiving boolean
----@field sending boolean
+---@field receiving boolean стоит ли клиент в очереди на чтение данных
+---@field sending boolean стоит ли клиент в очереди на отправку данных
+---@field looping boolean стоит ли клиент в общей очереди процессов (запускается )
 ---@field closed boolean?
 ---@field startline_sended boolean?
 ---@field header_sended boolean?
@@ -180,11 +181,15 @@ end
 ---@field request table
 ---@field response table
 ---@field thread thread
+---@field datagramsize number
 local server_obj = {}
 server_obj.receiving = true
 server_obj.sending = false
 server_obj.looping = false
+server_obj.datagramsize = socket._DATAGRAMSIZE
 
+---Добавить клиента в очеред на получение данных
+---@param state boolean
 function server_obj:setreceiving(state)
 	if self.receiving == state then return end
 	if self.receiving then
@@ -195,6 +200,8 @@ function server_obj:setreceiving(state)
 	self.receiving = state or false
 end
 
+---Добавить клиент в очередь на отправку данных
+---@param state boolean
 function server_obj:setsending(state)
 	if self.sending == state then return end
 	if self.sending then
@@ -205,6 +212,8 @@ function server_obj:setsending(state)
 	self.sending = state or false
 end
 
+---Добавить в пул процессов для асинхронного выполнения
+---@param state boolean
 function server_obj:setlooping(state)
 	if self.looping == state then return end
 	if self.looping then
@@ -440,14 +449,15 @@ while true do
 		coroutine.resume(newth, threaddata)
 	elseif err == "timeout" then
 		if #recvt > 0 or #sendt > 0 then
-			local readyread, readysend, err = socket.select(recvt, sendt, 0)
+			local readyread, readysend, err = socket.select(recvt, sendt, 0.01)
 			if err ~= "timeout" then
 				process_subpool(readyread, recvt)
 				process_subpool(readysend, sendt)
 			end
+		else
+			if #pool == 0 then socket.sleep(0.01) end
 		end
 		process_subpool(pool, pool)
-		socket.sleep(0.01)
 	else
 		print("Error happened while getting the connection.nError: " .. err)
 	end
