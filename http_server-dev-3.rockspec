@@ -1,5 +1,5 @@
 package = "http_server"
-version = "dev-2"
+version = "dev-3"
 source = {
    url = "git+https://github.com/MrSyabro/lua_http_server"
 }

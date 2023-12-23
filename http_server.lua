@@ -433,7 +433,7 @@ while true do
 				process_subpool(readysend, sendt)
 			end
 		else
-			server:settimeout(300)--if #pool == 0 then socket.sleep(0.01) end
+			server:settimeout(300)
 		end
 	else
 		print("Error happened while getting the connection.nError: " .. err)
