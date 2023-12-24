@@ -1,5 +1,6 @@
 #!/usr/bin/env lua
 local socket = require("socket")
+local url = require "socket.url"
 
 --{{Options
 ---The port number for the HTTP server. Default is 80
@@ -70,43 +71,10 @@ else
 	print("[WARN] Rules not found.")
 end
 
-local function unescape(s)
-	s = string.gsub(s, "+", " ")
-	s = string.gsub(s, "%%(%x%x)", function(h)
-		return string.char(tonumber(h, 16))
-	end)
-	return s
-end
-
-local args_fmt = "([^&=?]+)=([^&=?]+)"
----Парсит аргументы формата www-form-urlencoded
----@param args_str string
----@return table
-local function parse_args(args_str)
-	local args = {}
-	for key, value in string.gmatch(args_str,
-		args_fmt) do
-		args[key] = unescape(value)
-	end
-	return args
-end
-
--- Делим ссылку на имя файла и аргументы
-local function parse_uri(uri)
-	local i = string.find(uri, "?")
-	if i then
-		local args_str = string.sub(uri, i + 1)
-		local args = parse_args(args_str)
-		return string.sub(uri, 1, i - 1), args
-	else
-		return uri, {}
-	end
-end
-
 local start_line_fmt = "(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)"
 local function parse_start_line(start_line)
 	local request = {startline = start_line}
-	request.method, request.uri, request.protoname, request.protover = start_line:match(start_line_fmt)
+	request.method, request.rawurl, request.protoname, request.protover = start_line:match(start_line_fmt)
 	return request
 end
 
@@ -132,7 +100,7 @@ local function read_request(client)
 				end
 			end
 			request.header = table.concat(raw_headers, "\n")
-			request.filename, request.args = parse_uri(request.uri)
+			request.url = url.parse(request.rawurl, {})
 			return request
 		elseif err == "timeout" then
 			coroutine.yield()
@@ -264,7 +232,19 @@ end
 server_obj.__index = server_obj
 server_obj.ROOT_DIR = ROOT_DIR
 
-server_obj.parseurlargs = parse_args
+
+local args_fmt = "([^&=?]+)=([^&=?]+)"
+---Парсит аргументы формата www-form-urlencoded
+---@param query string
+---@return table
+function server_obj.parsequery(query)
+	local args = {}
+	for key, value in string.gmatch(query,
+		args_fmt) do
+		args[key] = url.unescape(value)
+	end
+	return args
+end
 
 local env_mt = { __index = _G }
 ---@param threaddata Server
@@ -287,7 +267,7 @@ local function thread_func(threaddata)
 				mess = "OK",
 			}
 			for _, rule in ipairs(rules) do
-				if request.filename:match(rule.regex) then
+				if request.rawurl:match(rule.regex) then
 					rule.func(request, response)
 				end
 			end
@@ -297,7 +277,7 @@ local function thread_func(threaddata)
 			threaddata.header_sended = false
 			threaddata.body_sended = false
 			
-			local filename = threaddata.request.filename
+			local filename = threaddata.request.url.path
 			local is_script = string.find(filename, ".lua") and true
 
 			if request.headers.connection == "keep-alive" then
@@ -335,7 +315,7 @@ local function thread_func(threaddata)
 				end
 				threaddata:sendbody()
 			else
-				local f = io.open(ROOT_DIR .. request.filename, "rb")
+				local f = io.open(ROOT_DIR .. request.url.path, "rb")
 
 				if f then
 					local data_lenghth = f:seek("end"); f:seek("set")
@@ -349,9 +329,9 @@ local function thread_func(threaddata)
 
 					f:close()
 				else
-					print("[ERROR] Page not found", request.filename)
+					print("[ERROR] Page not found", request.url.path)
 					threaddata:error(500, "File "
-						.. request.filename .. " not found.")
+						.. request.url.path .. " not found.")
 					threaddata:sendbody()
 				end
 			end
