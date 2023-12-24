@@ -1,7 +1,8 @@
 package = "http_server"
 version = "dev-3"
 source = {
-   url = "git+https://github.com/MrSyabro/lua_http_server"
+   url = "git+https://github.com/MrSyabro/lua_http_server",
+   tag = "dev-3",
 }
 description = {
    homepage = "https://github.com/MrSyabro/lua_http_server",
