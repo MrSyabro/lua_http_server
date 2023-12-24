@@ -67,7 +67,7 @@ if rules_file then
 elseif err then
 	print("[ERROR]", err)
 else
-	print("[INFO] Rules not found.")
+	print("[WARN] Rules not found.")
 end
 
 local function unescape(s)
@@ -271,17 +271,31 @@ local env_mt = { __index = _G }
 ---@return function?
 local function thread_func(threaddata)
 	local client = threaddata.client
-	local response = threaddata.response
 	repeat
+		threaddata:setreceiving(true)
+		threaddata:setsending(false)
 		local request = read_request(client)
 		
 		if request then
+			local response = {
+				headers = {
+					["Content-Type"] = "text/html; charset=utf-8", -- По дефолту отправляем html, utf-8
+					["Date"] = os.date("!%c GMT"),
+				},
+				body = {},
+				code = 200,
+				mess = "OK",
+			}
 			for _, rule in ipairs(rules) do
 				if request.filename:match(rule.regex) then
 					rule.func(request, response)
 				end
 			end
 			threaddata.request = request
+			threaddata.response = response
+			threaddata.startline_sended = false
+			threaddata.header_sended = false
+			threaddata.body_sended = false
 			
 			local filename = threaddata.request.filename
 			local is_script = string.find(filename, ".lua") and true
@@ -342,13 +356,12 @@ local function thread_func(threaddata)
 				end
 			end
 			if request.headers.connection ~= "keep-alive" then
-				threaddata:closecon()
 				return
 			end
 		else
 			return
 		end
-	until not request
+	until not request and threaddata.closed
 end
 
 local function process_subpool(subpool, pool)
@@ -381,11 +394,9 @@ server:settimeout(300)
 assert(server:bind("0.0.0.0", PORT))
 server:listen(socket._SETSIZE)
 print("[INFO] Max connections count", socket._SETSIZE)
-print("[INFO] Server listening...")
 
 -- Print IP and port
-local ip, port = server:getsockname()
-print("Listening on IP=" .. ip .. ", PORT=" .. port .. "...")
+print(("[INFO] Listening on IP=%s, PORT=%d."):format(server:getsockname()))
 
 while true do
 	local client, err = server:accept()
@@ -409,16 +420,6 @@ while true do
 		local threaddata = setmetatable({
 			client = client,
 			thread = newth,
-			response = {
-				headers = {
-					["Content-Type"] = "text/html; charset=utf-8", -- По дефолту отправляем html, utf-8
-					["Date"] = os.date("!%c GMT"),
-					--["Connection"] = "close",
-				},
-				body = {},
-				code = 200,
-				mess = "OK",
-			}
 		}, server_obj)
 		
 		threads[client] = threaddata
@@ -427,7 +428,7 @@ while true do
 		coroutine.resume(newth, threaddata)
 	elseif err == "timeout" then
 		if #recvt > 0 or #sendt > 0 then
-			local readyread, readysend, err = socket.select(recvt, sendt, 0)
+			local readyread, readysend, err = socket.select(recvt, sendt, 0.01)
 			if err ~= "timeout" then
 				process_subpool(readyread, recvt)
 				process_subpool(readysend, sendt)
