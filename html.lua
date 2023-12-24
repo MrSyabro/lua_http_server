@@ -17,7 +17,7 @@ end
 
 M.__index = function(self, key)
     return function(args, cont, ...)
-        if type(cont) ~= "table" then cont = {cont, ...} end
+        if type(cont) ~= "table" then cont = table.pack(cont, ...) end
         if not cont or (#cont < 1) then 
             local out = "<%s%%s />"
             local out_f = out:format(key, key)
