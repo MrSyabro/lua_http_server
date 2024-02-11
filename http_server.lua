@@ -1,13 +1,41 @@
 #!/usr/bin/env lua
-local socket = require("socket")
+local socket = require "socket"
 local url = require "socket.url"
 
---{{Options
----The port number for the HTTP server. Default is 80
-PORT = 8080
--- Этот параметр определяет, где сервер будет искать файлы.
-ROOT_DIR = arg[1] or "."
---}}Options
+---Парсинг конфигов
+---@type table<string, boolean|string>
+config = {
+	port = "8080",
+	root = ".",
+}
+for _, a in ipairs(arg) do
+local conf, key
+	if a:match "'" then
+		conf, key = a:match [[%-%-(%w+)='(.-)']]
+	elseif a:match '"' then
+		conf, key = a:match [[%-%-(%w+)="(.-)"]]
+	else
+		conf, key = a:match [[%-%-(%w+)=?(%g*)]]
+	end
+	if conf then
+		config[conf] = (key ~= "") and key or true
+	end
+end
+
+if config.help then
+	print([[Usage:
+	http_server [--port=8080] [--root=.] [--sslcert=cert.pem] [--sslkey=cert.key] [--sslca=rootCA.pem]
+
+	--help              показать это сообщение
+
+	--port=8080         порт, который будет прослушивать серве
+	--root=<dir>        путь к корневой папке файлов сервера
+
+	--sslcert=<file>    путь к файлу ssl сертификата
+	--sslkey=<file>     путь к файлу ключа от сертификата
+	--sslca=<file>      путь к файлу корневого сертификата]])
+	return
+end
 
 local codes = {
 	[200] = "OK",
@@ -15,28 +43,32 @@ local codes = {
 	[500] = "Internal server error",
 }
 
-local ssl
-local ssl_param
-local cert_file = io.open(ROOT_DIR .. "/cert.pem")
-if cert_file then
+local ssl, ssl_ctx, err
+if config.sslcert and config.sslkey then
 	local succ, ssll = pcall(require, "ssl")
 	if succ then
-		print("[INFO] OpneSSL loaded")
-		ssl_param = {
+		local params = {
 			mode = "server",
-			protocol = "sslv23",
-			key = ROOT_DIR .. "/key.pem",
-			certificate = ROOT_DIR .. "/cert.pem",
-			verify = { "peer" },
+			protocol = "any",
+			key = config.sslkey,
+			certificate = config.sslcert,
+			ca = config.sslca,
+			verify = { "none" },
 			options = { "all" },
 		}
-		ssl = ssll
+		ssl_ctx, err = ssll.newcontext(params)
+		if ssl_ctx then
+			ssl = ssll
+			print("[INFO] OpneSSL enabled")
+		else
+			print("[WARN] OpenSSL loading error:", err)
+			package.loaded.ssl = nil
+		end
 	elseif ssll then
 		print("[WARN] OpennSSL loading error:", ssl)
 	end
-	cert_file:close()
 else
-	print("[INFO] SSL disable")
+	print("[INFO] SSL disabled")
 end
 
 local recvt = {}
@@ -61,7 +93,7 @@ local last_thread = 0
 
 local rules = {}
 
-local rules_file, err = loadfile(ROOT_DIR .. "/rules.lua", "t", {})
+local rules_file, err = loadfile(config.root .. "/rules.lua", "t", {})
 if rules_file then
 	rules = rules_file()
 	print("[INFO] Rules loaded")
@@ -105,6 +137,7 @@ local function read_request(client)
 		elseif err == "timeout" then
 			coroutine.yield()
 		elseif err == "closed" then
+			print("Client closed")
 			return
 		else
 			io.stderr:write("[ERROR] Client " .. err .. "\n")
@@ -135,7 +168,7 @@ end
 ---@field startline_sended boolean?
 ---@field header_sended boolean?
 ---@field body_sended boolean?
----@field client table Socket.TCP клиент
+---@field client Socket Socket.TCP клиент
 ---@field request table
 ---@field response table
 ---@field thread thread
@@ -189,7 +222,7 @@ end
 ---Отсылает, если надо, тело, сохраненное в response.body, а перед этим headers
 function server_obj:sendbody()
 	local response = self.response
-	if self.body_sended then return end
+	if self.body_sended or not response then return end
 
 	local body, client = response.body, self.client
 	if #body > 0 then
@@ -217,20 +250,22 @@ end
 ---@param text string
 function server_obj:error(code, text)
 	local response = self.response
-	local err_mess = codes[code]
-	response.code = code
-	response.mess = err_mess
-	if text then
-		text = text:gsub("\n", "<br>")
-	else
-		text = ""
+	if response then
+		local err_mess = codes[code]
+		response.code = code
+		response.mess = err_mess
+		if text then
+			text = text:gsub("\n", "<br>")
+		else
+			text = ""
+		end
+		table.insert(response.body,
+			("<!DOCTYPE html><html lang='en'><body><h1>%s</h1><br><p>%s</p></body></html>"):format(err_mess, text))
 	end
-	table.insert(response.body,
-		("<!DOCTYPE html><html lang='en'><body><h1>%s</h1><br><p>%s</p></body></html>"):format(err_mess, text))
 end
 
 server_obj.__index = server_obj
-server_obj.ROOT_DIR = ROOT_DIR
+server_obj.ROOT_DIR = config.root
 
 
 local args_fmt = "([^&=?]+)=([^&=?]+)"
@@ -251,15 +286,34 @@ local env_mt = { __index = _G }
 ---@return function?
 local function thread_func(threaddata)
 	local client = threaddata.client
+	if ssl_ctx then
+		repeat
+			local suc, err = client:dohandshake()
+			if not suc and err == "wantread" then
+				threaddata:setreceiving(true)
+				threaddata:setsending(false)
+				coroutine.yield()
+			elseif not suc and err == "wantwrite" then
+				threaddata:setreceiving(false)
+				threaddata:setsending(true)
+				coroutine.yield()
+			elseif not suc then
+				io.stderr:write("[ERROR] Handshake: " .. tostring(err) .. "\n")
+				return
+			end
+		until suc
+	end
+	
 	repeat
 		threaddata:setreceiving(true)
 		threaddata:setsending(false)
 		local request = read_request(client)
 		
 		if request then
+			if ssl_ctx then request.headers.connection = nil end --ossl зависает при keepalice true
 			local response = {
 				headers = {
-					["Content-Type"] = "text/html; charset=utf-8", -- По дефолту отправляем html, utf-8
+					["Content-Type"] = "text/html; charset=utf-8",
 					["Date"] = os.date("!%c GMT"),
 				},
 				body = {},
@@ -277,16 +331,15 @@ local function thread_func(threaddata)
 			threaddata.header_sended = false
 			threaddata.body_sended = false
 			
-			local filename = threaddata.request.url.path
-			local is_script = string.find(filename, ".lua") and true
-
 			if request.headers.connection == "keep-alive" then
 				client:setoption("keepalive", true)
+			else
+				response.headers.Connection = "close"
 			end
 			threaddata:setreceiving(false)
 			threaddata:setsending(true)
 			coroutine.yield()
-			if is_script then -- если обратились к lua фалу
+			if request.is_script then -- если обратились к lua фалу
 				local threadenv = setmetatable({
 					server = threaddata,
 					request = request,
@@ -301,7 +354,7 @@ local function thread_func(threaddata)
 				}, env_mt)
 
 				local script_func, err = loadfile(
-					ROOT_DIR .. filename, "bt", threadenv) -- загрузка скрипта
+					config.root .. request.url.path, "bt", threadenv) -- загрузка скрипта
 
 				if script_func then
 					local ret, err = xpcall(script_func, debug.traceback)
@@ -315,7 +368,7 @@ local function thread_func(threaddata)
 				end
 				threaddata:sendbody()
 			else
-				local f = io.open(ROOT_DIR .. request.url.path, "rb")
+				local f = io.open(config.root .. request.url.path, "rb")
 
 				if f then
 					local data_lenghth = f:seek("end"); f:seek("set")
@@ -351,14 +404,13 @@ local function process_subpool(subpool, pool)
 		if t then
 			local cr = t.thread
 			local status, error = coroutine.resume(cr)
-			local crstatus = coroutine.status(cr)
-			if status and crstatus == "dead" then
+			if status and coroutine.status(cr) == "dead" then
 				t:closecon()
 				table.removedata(pool, client)
 				threads[client] = nil
 			elseif status == false then
 				io.stderr:write("[ERROR] " .. error .. " in " .. last_thread .. "\n")
-				t:error(500, err)
+				t:error(500, error)
 				t:closecon()
 				table.removedata(pool, client)
 				threads[client] = nil
@@ -371,44 +423,45 @@ end
 local server = assert(socket.tcp())
 server:setoption("reuseaddr", true)
 server:settimeout(300)
-assert(server:bind("0.0.0.0", PORT))
+assert(server:bind("0.0.0.0", tonumber(config.port)))
 server:listen(socket._SETSIZE)
 print("[INFO] Max connections count", socket._SETSIZE)
 
 -- Print IP and port
 print(("[INFO] Listening on IP=%s, PORT=%d."):format(server:getsockname()))
 
+local function process_client(client)
+	server:settimeout(0)
+	local newth = coroutine.create(thread_func)
+	local threaddata = setmetatable({
+		client = client,
+		thread = newth,
+	}, server_obj)
+	
+	threads[client] = threaddata
+	table.insert(recvt, client)
+	coroutine.resume(newth, threaddata)
+end
+
 while true do
 	local client, err = server:accept()
 
 	if client then
-		if ssl and ssl_param then
-			local ssl_client, err = ssl.wrap(client, ssl_param)
-			if ssl_client then
-				local suc, err = ssl_client:dohandshake()
-				if suc then
-					client = ssl_client
-				else
-					print("[ERROR] HANDSHAKE", err)
-				end
-			else
-				print("[ERROR] SSL_WRAP", err)
-			end
-		end
 		client:settimeout(0)
-		local newth = coroutine.create(thread_func)
-		local threaddata = setmetatable({
-			client = client,
-			thread = newth,
-		}, server_obj)
-		
-		threads[client] = threaddata
-		table.insert(recvt, client)
-		server:settimeout(0)
-		coroutine.resume(newth, threaddata)
+		if ssl_ctx then
+			local ssl_client, err = ssl.wrap(client, ssl_ctx)
+			if ssl_client then
+				process_client(ssl_client)
+			else
+				ssl_client:close()
+				print("[ERROR] Wrap:", err)
+			end
+		else
+			process_client(client)
+		end
 	elseif err == "timeout" then
 		if #recvt > 0 or #sendt > 0 then
-			local readyread, readysend, err = socket.select(recvt, sendt, 0.01)
+			local readyread, readysend, err = socket.select(recvt, sendt, 0.001)
 			if err ~= "timeout" then
 				process_subpool(readyread, recvt)
 				process_subpool(readysend, sendt)
@@ -417,6 +470,6 @@ while true do
 			server:settimeout(300)
 		end
 	else
-		print("Error happened while getting the connection.nError: " .. err)
+		print("Error happened while getting the connection.nError:", err)
 	end
 end
