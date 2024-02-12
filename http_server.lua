@@ -4,9 +4,10 @@ local url = require "socket.url"
 
 ---Парсинг конфигов
 ---@type table<string, boolean|string>
-config = {
+Config = {
 	port = "8080",
 	root = ".",
+	host = "0.0.0.0",
 }
 for _, a in ipairs(arg) do
 local conf, key
@@ -18,18 +19,21 @@ local conf, key
 		conf, key = a:match [[%-%-(%w+)=?(%g*)]]
 	end
 	if conf then
-		config[conf] = (key ~= "") and key or true
+		Config[conf] = (key ~= "") and key or true
 	end
 end
 
-if config.help then
+if Config.help then
 	print([[Usage:
-	http_server [--port=8080] [--root=.] [--sslcert=cert.pem] [--sslkey=cert.key] [--sslca=rootCA.pem]
+	http_server
 
+Args:
 	--help              показать это сообщение
 
-	--port=8080         порт, который будет прослушивать серве
+	--host=0.0.0.0      хост, который будет прослушивать сервер
+	--port=8080         порт, который будет прослушивать сервер
 	--root=<dir>        путь к корневой папке файлов сервера
+	--rules=<file>      путь к файлу правил
 
 	--sslcert=<file>    путь к файлу ssl сертификата
 	--sslkey=<file>     путь к файлу ключа от сертификата
@@ -37,22 +41,23 @@ if config.help then
 	return
 end
 
-local codes = {
+Codes = {
 	[200] = "OK",
+	[301] = "Moved Permanently",
 	[404] = "Page not found",
 	[500] = "Internal server error",
 }
 
 local ssl, ssl_ctx, err
-if config.sslcert and config.sslkey then
+if Config.sslcert and Config.sslkey then
 	local succ, ssll = pcall(require, "ssl")
 	if succ then
 		local params = {
 			mode = "server",
 			protocol = "any",
-			key = config.sslkey,
-			certificate = config.sslcert,
-			ca = config.sslca,
+			key = Config.sslkey,
+			certificate = Config.sslcert,
+			ca = Config.sslca,
 			verify = { "none" },
 			options = { "all" },
 		}
@@ -93,14 +98,16 @@ local last_thread = 0
 
 local rules = {}
 
-local rules_file, err = loadfile(config.root .. "/rules.lua", "t", {})
-if rules_file then
-	rules = rules_file()
-	print("[INFO] Rules loaded")
-elseif err then
-	print("[ERROR]", err)
-else
-	print("[WARN] Rules not found.")
+if type(Config.rules) == "string" then
+	local rules_file, err = loadfile(Config.rules, "t", _ENV)
+	if rules_file then
+		rules = rules_file()
+		print("[INFO] Rules loaded")
+	elseif err then
+		print("[ERROR]", err)
+	else
+		print("[WARN] Rules not found.")
+	end
 end
 
 local start_line_fmt = "(%w+)%s+(%g+)%s+(%w+)/([%d%.]+)"
@@ -251,7 +258,7 @@ end
 function server_obj:error(code, text)
 	local response = self.response
 	if response then
-		local err_mess = codes[code]
+		local err_mess = Codes[code]
 		response.code = code
 		response.mess = err_mess
 		if text then
@@ -265,7 +272,7 @@ function server_obj:error(code, text)
 end
 
 server_obj.__index = server_obj
-server_obj.ROOT_DIR = config.root
+server_obj.ROOT_DIR = Config.root
 
 
 local args_fmt = "([^&=?]+)=([^&=?]+)"
@@ -310,7 +317,7 @@ local function thread_func(threaddata)
 		local request = read_request(client)
 		
 		if request then
-			if ssl_ctx then request.headers.connection = nil end --ossl зависает при keepalice true
+			if ssl_ctx then request.headers.connection = nil end --ossl зависает при keepalive true
 			local response = {
 				headers = {
 					["Content-Type"] = "text/html; charset=utf-8",
@@ -320,22 +327,25 @@ local function thread_func(threaddata)
 				code = 200,
 				mess = "OK",
 			}
-			for _, rule in ipairs(rules) do
-				if request.rawurl:match(rule.regex) then
-					rule.func(request, response)
-				end
-			end
-			threaddata.request = request
-			threaddata.response = response
-			threaddata.startline_sended = false
-			threaddata.header_sended = false
-			threaddata.body_sended = false
-			
+
 			if request.headers.connection == "keep-alive" then
 				client:setoption("keepalive", true)
 			else
 				response.headers.Connection = "close"
 			end
+
+			threaddata.request = request
+			threaddata.response = response
+			threaddata.startline_sended = false
+			threaddata.header_sended = false
+			threaddata.body_sended = false
+
+			for _, rule in ipairs(rules) do
+				if request.rawurl:match(rule.regex) then
+					rule.func(threaddata)
+				end
+			end
+			
 			threaddata:setreceiving(false)
 			threaddata:setsending(true)
 			coroutine.yield()
@@ -354,7 +364,7 @@ local function thread_func(threaddata)
 				}, env_mt)
 
 				local script_func, err = loadfile(
-					config.root .. request.url.path, "bt", threadenv) -- загрузка скрипта
+					Config.root .. request.url.path, "bt", threadenv) -- загрузка скрипта
 
 				if script_func then
 					local ret, err = xpcall(script_func, debug.traceback)
@@ -368,7 +378,7 @@ local function thread_func(threaddata)
 				end
 				threaddata:sendbody()
 			else
-				local f = io.open(config.root .. request.url.path, "rb")
+				local f = io.open(Config.root .. request.url.path, "rb")
 
 				if f then
 					local data_lenghth = f:seek("end"); f:seek("set")
@@ -423,7 +433,7 @@ end
 local server = assert(socket.tcp())
 server:setoption("reuseaddr", true)
 server:settimeout(300)
-assert(server:bind("0.0.0.0", tonumber(config.port)))
+assert(server:bind(Config.host, tonumber(Config.port)))
 server:listen(socket._SETSIZE)
 print("[INFO] Max connections count", socket._SETSIZE)
 
