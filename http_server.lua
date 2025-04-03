@@ -48,6 +48,17 @@ Codes = {
 	[500] = "Internal server error",
 }
 
+if string.match(Config.root, "/$") then Config.root = Config.root:sub(1, -2) end
+print("[INFO] Root:", Config.root)
+
+if Config.root ~= "." then
+	package.path = table.concat({
+		Config.root .. "/?.lua",
+		Config.root .. "/?/init.lua",
+		package.path
+	}, ";")
+end
+
 local ssl, ssl_ctx, err
 if Config.sslcert and Config.sslkey then
 	local succ, ssll = pcall(require, "ssl")
@@ -86,7 +97,7 @@ function table.search(list, data)
 end
 
 function table.removedata(list, data)
-	local pos = table.search(list)
+	local pos = table.search(list, data)
 	if pos then
 		table.remove(list, pos)
 	end
@@ -261,6 +272,7 @@ function server_obj:error(code, text)
 		local err_mess = Codes[code]
 		response.code = code
 		response.mess = err_mess
+		response.headers["Content-Type"] = "text/html; charset=utf-8"
 		if text then
 			text = text:gsub("\n", "<br>")
 		else
@@ -349,7 +361,7 @@ local function thread_func(threaddata)
 			threaddata:setreceiving(false)
 			threaddata:setsending(true)
 			coroutine.yield()
-			if request.is_script then -- если обратились к lua фалу
+			if string.find(request.url.path, ".lua") then -- если обратились к lua фалу
 				local threadenv = setmetatable({
 					server = threaddata,
 					request = request,

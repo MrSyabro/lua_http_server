@@ -1,6 +1,6 @@
 local fs = require "lfs"
 local h = require "html"
-local page = dofile "page.lua"
+local page = require "page"
 local url = require "socket.url"
 
 local query = {}
@@ -9,7 +9,7 @@ if request.url.query then
 end
 local file = query.file
 if file then
-	local f, err = io.open(server.ROOT_DIR .. "/" .. file, "rb")
+	local f, err = io.open(Config.root .. "/" .. file, "rb")
 	if f then
 		local data_lenghth = f:seek("end"); f:seek("set")
 		response.headers["Content-Type"] = "application/octet-stream"
@@ -44,7 +44,9 @@ if #dirnodes > 0 then
 		else
 			table.insert(dirnav,
 				h.li(breadcrumpattr,
-					h.a({ href = "/files?dir=" .. url.escape("/" .. table.concat(dirnodes, "/", 1, i) .. "/") }, node)))
+					h.a({ href = "/files?dir=" .. url.escape("/" .. table.concat(dirnodes, "/", 1, i) .. "/") }, node)
+				)
+			)
 		end
 	end
 end
@@ -54,9 +56,9 @@ local out = {}
 local fileimgattr = { src = "assets/file.png", alt = "twbs", height = "32", class = "flex-shrink-0" }
 local dirimgattr = { src = "assets/folder.png", class = "flex-shrink-0", height = "32", alt = "Directory" }
 
-for d in fs.dir(server.ROOT_DIR .. "/" .. dir) do
+for d in fs.dir(Config.root .. "/" .. dir) do
 	if d ~= "." and d ~= ".." then
-		local attr, err = fs.attributes(server.ROOT_DIR .. "/" .. dir .. d)
+		local attr, err = fs.attributes(Config.root .. "/" .. dir .. d)
 		if attr then
 			if attr.mode == "directory" then
 				local card = h.a({

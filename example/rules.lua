@@ -7,7 +7,7 @@ return {
 	{regex = "pem", func = index},
 	{regex = "index$", func = index},
 
-	{regex = "files", func = function(s) s.url.path = "/files.lua" end},
+	{regex = "files", func = function(s) s.request.url.path = "/files.lua" end},
 	{regex = "dump%-headers", func = function(s) s.request.url.path = "/dump-headers.lua" end},
 	{regex = "getfile", func = function(s) s.request.url.path = "/getfile.lua" end},
 

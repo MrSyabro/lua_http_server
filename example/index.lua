@@ -1,4 +1,4 @@
-local page = dofile "page.lua"
+local page = require "page"
 
 echo(page("Home", ([[
         <div class="container my-5">

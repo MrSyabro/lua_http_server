@@ -1,4 +1,10 @@
-local M = {}
+---@alias html_args table<string, any>
+---@alias html_node table<string, html_node>|fun(args: html_args, ...:string)
+
+---@type html_node
+local M = {
+    __name = "HTML"
+}
 
 local function parse_args(args)
     if not args then return "" end

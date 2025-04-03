@@ -1,14 +1,17 @@
 local h = require "html"
-local page = dofile "page.lua"
+local page = require "page"
 
 local lead = {class = "lead"}
 
-local args = request.args
+local args
+
 if request.method == "POST" then
     local data, err = client:receive(request.headers["content-length"])
     if data then
-        args = server.parseurlargs(data)
+        args = server.parsequery(data)
     end
+elseif request.method == "GET" then
+    args = server.parsequery(request.url.query)
 end
 
 local out = h.p(lead, "Вы не ввели имя или фамилию?")

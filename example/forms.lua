@@ -1,5 +1,5 @@
 local h = require "html"
-local page = dofile "page.lua"
+local page = require "page"
 
 local div_args = { class = "mb-3" }
 local function gen_elements()
@@ -31,16 +31,18 @@ local postinput = h.form(
     gen_elements()
 )
 
-echo(page("Forms example", h.div({ class = "container my-5" },
-    h.p({ class = "lead" }, "На этой странице демонстрируется отправка формы на другую страницу сервера."),
-    h.div({ class = "row" },
-        h.div({ class = "col-lg-6 mx-auto" },
-            h.p({ class = "lead" }, "Эта форма отправлает GET запрос"),
-            getinput
-        ),
-        h.div({ class = "col-lg-6 mx-auto" },
-            h.p({ class = "lead" }, "А эта форма отправляет POST запрос"),
-            postinput
+echo(page("Forms example",
+    h.div({ class = "container my-5" },
+        h.p({ class = "lead" }, "На этой странице демонстрируется отправка формы на другую страницу сервера."),
+        h.div({ class = "row" },
+            h.div({ class = "col-lg-6 mx-auto" },
+                h.p({ class = "lead" }, "Эта форма отправлает GET запрос"),
+                getinput
+            ),
+            h.div({ class = "col-lg-6 mx-auto" },
+                h.p({ class = "lead" }, "А эта форма отправляет POST запрос"),
+                postinput
+            )
         )
     )
-)))
+))

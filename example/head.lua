@@ -1,8 +1,8 @@
 local h = require "html"
 
----@param page_name string тайл страницы
+---@param title string
 ---@return string
-return function(page_name)
+return function(title)
     return h.head(nil,
         h.meta { charset="utf-8" },
         h.meta { name="viewport", content="width=device-width, initial-scale=1" },
@@ -18,6 +18,6 @@ return function(page_name)
             integrity="sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL",
             crossorigin="anonymous"}, ""
         ),
-        h.title(nil, page_name)
+        h.title(nil, title)
     )
 end
